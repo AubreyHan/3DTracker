@@ -1,0 +1,2146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D轨迹：2026暑期西北自驾游 (8015公里大环线)</title>
+  <!-- MapLibre GL JS v4 -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <!-- Leaflet Fallback for non-WebGL environments -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Google Fonts & Lucide Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <!-- Trip Data -->
+  <script src="trip_data.js"></script>
+  <style>
+    :root {
+      --bg-dark: #0a0e17;
+      --panel-bg: rgba(13, 20, 36, 0.78);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --accent-gold: #f59e0b;
+      --accent-cyan: #06b6d4;
+      --accent-red: #ef4444;
+      --accent-green: #10b981;
+      --accent-purple: #a855f7;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg-dark);
+      font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text-main);
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    /* Glassmorphism Classes */
+    .glass-card {
+      background: var(--panel-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+    }
+
+    /* Top Navigation Header */
+    .top-header {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      pointer-events: auto;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+    }
+
+    .brand-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      background: linear-gradient(to right, #ffffff, #fef08a, #f59e0b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.8px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 2px;
+    }
+
+    .header-center-info {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .info-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 12px;
+    }
+
+    .info-badge .val {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      color: var(--accent-gold);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-action {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text-main);
+      padding: 7px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-action:hover {
+      background: rgba(255, 255, 255, 0.18);
+      border-color: rgba(255, 255, 255, 0.35);
+      transform: translateY(-1px);
+    }
+
+    .btn-action.active {
+      background: linear-gradient(135deg, #0284c7, #06b6d4);
+      border-color: #38bdf8;
+      box-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
+    }
+
+    /* Left Drawer: Itinerary & Day Selector */
+    .itinerary-drawer {
+      position: absolute;
+      top: 86px;
+      left: 16px;
+      bottom: 220px;
+      width: 320px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .itinerary-drawer.collapsed {
+      transform: translateX(-340px);
+    }
+
+    .drawer-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .drawer-title {
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .drawer-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .drawer-list::-webkit-scrollbar {
+      width: 5px;
+    }
+    .drawer-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+    }
+
+    .day-card {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .day-card:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateX(2px);
+    }
+
+    .day-card.active {
+      background: rgba(245, 158, 11, 0.12);
+      border-color: var(--accent-gold);
+      box-shadow: 0 0 14px rgba(245, 158, 11, 0.2);
+    }
+
+    .day-card.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: var(--accent-gold);
+    }
+
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .day-badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fef08a;
+      letter-spacing: 0.5px;
+    }
+
+    .day-date {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .day-route-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 4px;
+      line-height: 1.3;
+    }
+
+    .day-stats-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .day-stats-row span {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .day-stats-row .km {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+
+    .drawer-toggle-btn {
+      position: absolute;
+      right: -36px;
+      top: 14px;
+      width: 36px;
+      height: 36px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-left: none;
+      border-radius: 0 8px 8px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #fff;
+      font-size: 16px;
+      box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Right Cockpit Telemetry HUD */
+    .cockpit-hud {
+      position: absolute;
+      top: 86px;
+      right: 16px;
+      width: 300px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      pointer-events: auto;
+    }
+
+    .telemetry-card {
+      padding: 16px;
+    }
+
+    .hud-title-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 8px;
+    }
+
+    .hud-gauges {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .gauge-box {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .gauge-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .gauge-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+
+    .gauge-unit {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .speed-val { color: var(--accent-cyan); text-shadow: 0 0 12px rgba(6, 182, 212, 0.4); }
+    .ele-val { color: var(--accent-gold); text-shadow: 0 0 12px rgba(245, 158, 11, 0.4); }
+
+    .current-location-box {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .loc-label {
+      font-size: 10px;
+      color: var(--accent-gold);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .loc-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.3;
+    }
+
+    .loc-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .camera-control-box {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .control-row-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .cam-modes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .cam-btn {
+      padding: 7px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.2s ease;
+    }
+
+    .cam-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .cam-btn.active {
+      background: linear-gradient(135deg, #0284c7, #06b6d4);
+      border-color: #38bdf8;
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.4);
+    }
+
+    /* Bottom Control Bar & Elevation Profile */
+    .bottom-section {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    /* Elevation Profile Card */
+    .elevation-card {
+      padding: 10px 16px 8px 16px;
+      position: relative;
+    }
+
+    .profile-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .profile-title {
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .profile-hover-info {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-gold);
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    #elevation-chart-container {
+      width: 100%;
+      height: 70px;
+      position: relative;
+      cursor: crosshair;
+    }
+
+    #elevation-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .chart-cursor-line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #f59e0b;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+      pointer-events: none;
+      transform: translateX(-50%);
+    }
+
+    .chart-scrubber-line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.9);
+      pointer-events: none;
+      transform: translateX(-50%);
+    }
+
+    /* Player Controls Bar */
+    .player-bar {
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .player-main-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-play {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      border: none;
+      color: #fff;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
+      transition: all 0.2s ease;
+    }
+
+    .btn-play:hover {
+      transform: scale(1.06);
+      box-shadow: 0 0 24px rgba(245, 158, 11, 0.8);
+    }
+
+    .btn-circle-mini {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-circle-mini:hover {
+      background: rgba(255, 255, 255, 0.18);
+      transform: scale(1.05);
+    }
+
+    .timeline-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .timeline-labels {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .timeline-slider-track {
+      position: relative;
+      width: 100%;
+      height: 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      cursor: pointer;
+    }
+
+    .timeline-progress {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, #0284c7, #06b6d4, #f59e0b);
+      border-radius: 4px;
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+    }
+
+    .speed-selector-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 3px 6px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .speed-btn {
+      padding: 3px 8px;
+      border-radius: 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .speed-btn:hover {
+      color: #fff;
+    }
+
+    .speed-btn.active {
+      background: var(--accent-gold);
+      color: #000;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+    }
+
+    /* Vehicle 3D Marker Styling */
+    .vehicle-marker {
+      width: 44px;
+      height: 44px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      pointer-events: none;
+    }
+
+    .vehicle-ripple {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: rgba(6, 182, 212, 0.25);
+      border: 2px solid #06b6d4;
+      animation: vehiclePulse 2s infinite cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .vehicle-beam {
+      position: absolute;
+      top: -30px;
+      width: 0;
+      height: 0;
+      border-left: 12px solid transparent;
+      border-right: 12px solid transparent;
+      border-top: 32px solid rgba(245, 158, 11, 0.45);
+      filter: blur(2px);
+      pointer-events: none;
+    }
+
+    .vehicle-body {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, #0ea5e9, #0284c7);
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 0 14px #0ea5e9, inset 0 0 6px #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+
+    .vehicle-arrow {
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-bottom: 11px solid #ffffff;
+      transform: translateY(-1px);
+    }
+
+    @keyframes vehiclePulse {
+      0% { transform: scale(0.6); opacity: 1; }
+      100% { transform: scale(2.4); opacity: 0; }
+    }
+
+    /* Landmark POI Marker */
+    .poi-marker {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+      z-index: 5;
+    }
+
+    .poi-marker:hover {
+      transform: scale(1.15) translateY(-4px);
+    }
+
+    .poi-bubble {
+      padding: 4px 8px;
+      background: rgba(13, 20, 36, 0.9);
+      border: 1px solid var(--accent-gold);
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .poi-pin-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-gold);
+      box-shadow: 0 0 10px var(--accent-gold);
+      margin-top: 2px;
+    }
+
+    /* Modal Styling */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-content {
+      width: 720px;
+      max-width: 90vw;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 14px;
+      margin-bottom: 18px;
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card-inner {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .stat-number {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent-gold);
+    }
+
+    .legs-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .legs-table th {
+      text-align: left;
+      padding: 8px;
+      color: var(--text-muted);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .legs-table td {
+      padding: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    /* Toast Notification */
+    .toast-msg {
+      position: fixed;
+      top: 86px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(13, 20, 36, 0.95);
+      border: 1px solid var(--accent-cyan);
+      color: #fff;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      z-index: 2000;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s ease;
+    }
+
+    .toast-msg.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(4px);
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 900px) {
+      .cockpit-hud { display: none; }
+      .itinerary-drawer { width: 260px; }
+      .brand-sub { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D Map Container -->
+  <div id="map"></div>
+
+  <!-- Top Navigation Header -->
+  <header class="top-header glass-card">
+    <div class="brand-section">
+      <div class="brand-logo">🚙</div>
+      <div>
+        <div class="brand-title">3D轨迹 · 2026暑期西北自驾大环线</div>
+        <div class="brand-sub">
+          <span>京新G7进 · 丝路长驱 · 柴达木腹地 · 青海湖天路</span>
+          <span>•</span>
+          <span style="color: var(--accent-gold);">8,015 公里壮丽巡礼</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-center-info">
+      <div class="info-badge">
+        <span>📅 日期:</span>
+        <span class="val" id="hud-clock">2026.08.08</span>
+      </div>
+      <div class="info-badge">
+        <span>📍 地点:</span>
+        <span class="val" id="hud-leg-title" style="color: #fff;">北京出发</span>
+      </div>
+      <div class="info-badge">
+        <span>🛣️ 里程:</span>
+        <span class="val" id="hud-total-km">0.0 / 8,015 km</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <!-- Basemap Dropdown -->
+      <button class="btn-action" id="btn-style-sat" onclick="switchMapStyle('satellite')">🛰️ 卫星实景</button>
+      <button class="btn-action" id="btn-style-topo" onclick="switchMapStyle('topo')">⛰️ 地形等高</button>
+      <button class="btn-action" id="btn-style-dark" onclick="switchMapStyle('dark')">🌃 赛博夜景</button>
+      <!-- Stats Modal -->
+      <button class="btn-action" onclick="openStatsModal()">📊 全程数据</button>
+      <!-- Screenshot -->
+      <button class="btn-action" onclick="captureScreen()">📸 截屏</button>
+      <!-- Fullscreen -->
+      <button class="btn-action" onclick="toggleFullscreen()">⛶ 全屏</button>
+    </div>
+  </header>
+
+  <!-- Left Drawer: 15-Day Itinerary -->
+  <aside class="itinerary-drawer glass-card" id="itineraryDrawer">
+    <div class="drawer-header">
+      <div class="drawer-title">
+        <span>🗺️</span> 行程路线速查 (共15天)
+      </div>
+      <button class="btn-action" style="padding: 3px 8px; font-size: 11px;" onclick="fitMasterRoute()">
+        全景闭环
+      </button>
+    </div>
+    <div class="drawer-list" id="dayListContainer">
+      <!-- Injected dynamically by JS -->
+    </div>
+    <div class="drawer-toggle-btn" onclick="toggleDrawer()">
+      <span id="drawerToggleIcon">◀</span>
+    </div>
+  </aside>
+
+  <!-- Right Cockpit HUD -->
+  <aside class="cockpit-hud">
+    <div class="telemetry-card glass-card">
+      <div class="hud-title-bar">
+        <span>仪表盘 TELEMETRY</span>
+        <span id="hud-live-tag" style="color: var(--accent-green); font-family: 'JetBrains Mono';">● 巡航中</span>
+      </div>
+
+      <div class="hud-gauges">
+        <div class="gauge-box">
+          <div class="gauge-label">⚡ 当前时速</div>
+          <div class="gauge-val speed-val" id="gauge-speed">0</div>
+          <div class="gauge-unit">KM / H</div>
+        </div>
+        <div class="gauge-box">
+          <div class="gauge-label">⛰️ 当前海拔</div>
+          <div class="gauge-val ele-val" id="gauge-ele">44</div>
+          <div class="gauge-unit">METERS (m)</div>
+        </div>
+      </div>
+
+      <div class="current-location-box">
+        <div class="loc-label" id="loc-highway-label">当前路段 · 启程</div>
+        <div class="loc-name" id="loc-name-text">北京市朝阳区</div>
+        <div class="loc-desc" id="loc-desc-text">西北8000公里自驾大征程起点，准备出京经G7京新高速向西进发。</div>
+      </div>
+
+      <div class="camera-control-box" style="margin-top: 12px;">
+        <div class="control-row-label">3D 镜头视角</div>
+        <div class="cam-modes">
+          <button class="cam-btn active" id="cam-chase" onclick="setCameraMode('chase')">🚗 车尾跟随</button>
+          <button class="cam-btn" id="cam-drone" onclick="setCameraMode('drone')">🦅 鸟瞰巡航</button>
+          <button class="cam-btn" id="cam-orbit" onclick="setCameraMode('orbit')">🔄 360°环视</button>
+          <button class="cam-btn" id="cam-overview" onclick="setCameraMode('overview')">🗺️ 全线大环</button>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">
+          <span>3D地形立体夸张度</span>
+          <span id="terrain-val-label" style="font-family: 'JetBrains Mono'; color: var(--accent-cyan);">1.5x</span>
+        </div>
+        <input type="range" id="terrain-exaggeration" min="1.0" max="2.5" step="0.1" value="1.5" style="width: 100%; accent-color: var(--accent-cyan);" oninput="updateTerrainExaggeration(this.value)">
+      </div>
+    </div>
+  </aside>
+
+  <!-- Bottom Section: Elevation Chart & Player Bar -->
+  <section class="bottom-section">
+    <!-- Elevation Profile Card -->
+    <div class="elevation-card glass-card">
+      <div class="profile-header">
+        <div class="profile-title">
+          <span>📈</span> 全程高程剖面图 (北京 44m → 吐鲁番 -42m → 橡皮山 3779m)
+        </div>
+        <div class="profile-hover-info" id="profile-hover-val">
+          悬停或点击剖面可跳转
+        </div>
+      </div>
+      <div id="elevation-chart-container" onclick="handleChartClick(event)" onmousemove="handleChartHover(event)" onmouseleave="handleChartLeave()">
+        <canvas id="elevation-canvas"></canvas>
+        <div class="chart-cursor-line" id="chartCursor" style="display: none;"></div>
+        <div class="chart-scrubber-line" id="chartScrubber"></div>
+      </div>
+    </div>
+
+    <!-- Playback Controls Bar -->
+    <div class="player-bar glass-card">
+      <div class="player-main-controls">
+        <button class="btn-circle-mini" title="上一段" onclick="prevLeg()">⏮</button>
+        <button class="btn-play" id="btnPlay" title="播放 / 暂停 (空格键)" onclick="togglePlay()">▶</button>
+        <button class="btn-circle-mini" title="下一段" onclick="nextLeg()">⏭</button>
+      </div>
+
+      <div class="timeline-wrapper">
+        <div class="timeline-labels">
+          <span id="time-current-text">2026-08-08 04:46</span>
+          <span id="dist-progress-text" style="color: var(--accent-gold); font-weight: 700;">0.0 km / 8,014.9 km (0.0%)</span>
+          <span id="time-total-text">2026-08-22 18:31</span>
+        </div>
+        <div class="timeline-slider-track" id="timelineTrack" onclick="handleTimelineClick(event)">
+          <div class="timeline-progress" id="timelineProgress"></div>
+        </div>
+      </div>
+
+      <div class="speed-selector-group">
+        <button class="speed-btn" onclick="setSpeed(1)">1x</button>
+        <button class="speed-btn" onclick="setSpeed(5)">5x</button>
+        <button class="speed-btn" onclick="setSpeed(20)">20x</button>
+        <button class="speed-btn active" onclick="setSpeed(50)">50x</button>
+        <button class="speed-btn" onclick="setSpeed(100)">100x</button>
+        <button class="speed-btn" onclick="setSpeed(300)">300x</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Trip Statistics Modal -->
+  <div class="modal-overlay" id="statsModal" onclick="closeModalOnBg(event)">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <div class="modal-title">📊 2026暑期西北自驾大环线 · 深度数据报告</div>
+        <button class="modal-close" onclick="closeStatsModal()">&times;</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card-inner">
+          <div class="stat-label">总行驶里程</div>
+          <div class="stat-number">8,014.9 <span style="font-size: 13px; color: var(--text-muted);">KM</span></div>
+        </div>
+        <div class="stat-card-inner">
+          <div class="stat-label">全程最高海拔 (橡皮山)</div>
+          <div class="stat-number">3,779 <span style="font-size: 13px; color: var(--text-muted);">M</span></div>
+        </div>
+        <div class="stat-card-inner">
+          <div class="stat-label">全程最低海拔 (吐鲁番)</div>
+          <div class="stat-number">-42 <span style="font-size: 13px; color: var(--text-muted);">M</span></div>
+        </div>
+        <div class="stat-card-inner">
+          <div class="stat-label">相对高差跨度</div>
+          <div class="stat-number">3,821 <span style="font-size: 13px; color: var(--text-muted);">M</span></div>
+        </div>
+        <div class="stat-card-inner">
+          <div class="stat-label">历时总天数</div>
+          <div class="stat-number">15 <span style="font-size: 13px; color: var(--text-muted);">DAYS</span></div>
+        </div>
+        <div class="stat-card-inner">
+          <div class="stat-label">跨越省区</div>
+          <div class="stat-number">6 <span style="font-size: 13px; color: var(--text-muted);">省市直辖</span></div>
+        </div>
+      </div>
+
+      <div style="font-size: 13px; font-weight: 700; margin-bottom: 10px; color: #fff;">
+        📅 每日分段行程明细 (共16条 Garmin GPX记录)
+      </div>
+
+      <div style="max-height: 320px; overflow-y: auto;">
+        <table class="legs-table" id="legsTableBody">
+          <!-- Injected dynamically -->
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast-msg" id="toast">提示信息</div>
+
+  <script>
+    /**
+     * Application State & Data Initialization
+     */
+    const tripData = window.TRIP_DATA;
+    if (!tripData) {
+      alert("无法加载轨迹数据 trip_data.js，请确保文件存在！");
+    }
+
+    const { summary, legs, pois, points } = tripData;
+    const totalPoints = points.length;
+
+    let map = null;
+    let isPlaying = false;
+    let currentIndex = 0;
+    let currentSpeed = 50; // default 50x
+    let cameraMode = 'chase'; // 'chase', 'drone', 'orbit', 'overview'
+    let orbitAngle = 0;
+    let lastAnimTimestamp = null;
+    let vehicleMarker = null;
+    let poiMarkers = [];
+    let currentMapStyle = 'satellite';
+
+    // Format timestamps to Beijing Time (UTC+8)
+    function formatTimeCST(epochSec) {
+      const d = new Date(epochSec * 1000);
+      const Y = d.getUTCFullYear();
+      const M = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const D = String(d.getUTCDate()).padStart(2, '0');
+      const h = String((d.getUTCHours() + 8) % 24).padStart(2, '0');
+      const m = String(d.getUTCMinutes()).padStart(2, '0');
+      return `${Y}-${M}-${D} ${h}:${m}`;
+    }
+
+    function formatShortDate(epochSec) {
+      const d = new Date(epochSec * 1000);
+      const M = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const D = String(d.getUTCDate()).padStart(2, '0');
+      return `${M}月${D}日`;
+    }
+
+    /**
+     * MapLibre Map Setup
+     */
+    
+    let isLeafletMode = false;
+    let leafletMap = null;
+    let leafletFullPolyline = null;
+    let leafletTraveledPolyline = null;
+    let leafletVehicleMarker = null;
+    let leafletPoiMarkers = [];
+    let leafletTileLayer = null;
+
+    function checkWebGLSupport() {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl2');
+        return !!gl;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function initMap() {
+      const mapEl = document.getElementById('map');
+      if (!mapEl) return;
+
+      if (!checkWebGLSupport()) {
+        console.warn("当前环境未检测到 WebGL2 支持，启用备用巡航地图模式。");
+        isLeafletMode = true;
+        mapEl.innerHTML = '';
+        if (mapEl._leaflet_id) delete mapEl._leaflet_id;
+        initLeafletMap();
+        return;
+      }
+
+      try {
+        initMapLibre3D();
+      } catch (e) {
+        console.warn("MapLibre 3D 初始化异常，自动切换为备用模式:", e);
+        isLeafletMode = true;
+        mapEl.innerHTML = '';
+        if (mapEl._leaflet_id) delete mapEl._leaflet_id;
+        initLeafletMap();
+      }
+    }
+
+    function initLeafletMap() {
+      const startPt = points[0];
+      leafletMap = L.map('map', {
+        center: [startPt[1], startPt[0]],
+        zoom: 7,
+        zoomControl: true
+      });
+
+      leafletTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 18,
+        attribution: 'Esri Satellite'
+      }).addTo(leafletMap);
+
+      const latLngs = points.map(p => [p[1], p[0]]);
+      leafletFullPolyline = L.polyline(latLngs, {
+        color: '#06b6d4',
+        weight: 3.5,
+        opacity: 0.75,
+        lineJoin: 'round'
+      }).addTo(leafletMap);
+
+      leafletTraveledPolyline = L.polyline([[startPt[1], startPt[0]]], {
+        color: '#f59e0b',
+        weight: 5,
+        opacity: 0.95,
+        lineJoin: 'round'
+      }).addTo(leafletMap);
+
+      // Vehicle marker
+      const carIcon = L.divIcon({
+        className: 'leaflet-vehicle-wrap',
+        html: `
+          <div class="vehicle-marker" style="transform: translate(-50%, -50%);">
+            <div class="vehicle-ripple"></div>
+            <div class="vehicle-beam" id="vehicleBeam"></div>
+            <div class="vehicle-body" id="vehicleBody">
+              <div class="vehicle-arrow"></div>
+            </div>
+          </div>
+        `,
+        iconSize: [44, 44],
+        iconAnchor: [22, 22]
+      });
+
+      leafletVehicleMarker = L.marker([startPt[1], startPt[0]], { icon: carIcon }).addTo(leafletMap);
+
+      // POI Markers
+      pois.forEach(poi => {
+        const poiIcon = L.divIcon({
+          className: 'leaflet-poi-wrap',
+          html: `
+            <div class="poi-marker" style="transform: translate(-50%, -100%);">
+              <div class="poi-bubble">
+                <span>🚩</span>
+                <span>${poi.name}</span>
+                <span style="color: var(--accent-gold); font-family: 'JetBrains Mono'; font-size: 10px;">${poi.ele}m</span>
+              </div>
+              <div class="poi-pin-dot"></div>
+            </div>
+          `,
+          iconSize: [120, 36],
+          iconAnchor: [60, 36]
+        });
+
+        const m = L.marker([poi.lat, poi.lon], { icon: poiIcon }).addTo(leafletMap);
+        m.on('click', () => {
+          leafletMap.flyTo([poi.lat, poi.lon], 11, { duration: 1.5 });
+          showToast(`🚩 ${poi.name}: ${poi.desc}`);
+        });
+        leafletPoiMarkers.push(m);
+      });
+
+      renderElevationProfile();
+      initUI();
+      fitMasterRoute();
+      showToast("💡 当前环境已启用高清卫星遥感巡航引擎");
+    }
+
+    function initMapLibre3D() {
+
+      const styleConfig = {
+        version: 8,
+        sources: {
+          'esri-satellite': {
+            type: 'raster',
+            tiles: [
+              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+            ],
+            tileSize: 256,
+            maxzoom: 18
+          },
+          'carto-dark': {
+            type: 'raster',
+            tiles: [
+              'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+            ],
+            tileSize: 256
+          },
+          'opentopo': {
+            type: 'raster',
+            tiles: [
+              'https://tile.opentopomap.org/{z}/{x}/{y}.png'
+            ],
+            tileSize: 256
+          },
+          'terrain-dem': {
+            type: 'raster-dem',
+            tiles: [
+              'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+            ],
+            encoding: 'terrarium',
+            tileSize: 256,
+            maxzoom: 15
+          }
+        },
+        layers: [
+          {
+            id: 'basemap-satellite',
+            type: 'raster',
+            source: 'esri-satellite',
+            layout: { visibility: 'visible' }
+          },
+          {
+            id: 'basemap-topo',
+            type: 'raster',
+            source: 'opentopo',
+            layout: { visibility: 'none' }
+          },
+          {
+            id: 'basemap-dark',
+            type: 'raster',
+            source: 'carto-dark',
+            layout: { visibility: 'none' }
+          },
+          {
+            id: 'hills',
+            type: 'hillshade',
+            source: 'terrain-dem',
+            layout: { visibility: 'visible' },
+            paint: {
+              'hillshade-exaggeration': 0.6,
+              'hillshade-shadow-color': '#050811',
+              'hillshade-highlight-color': '#ffffff'
+            }
+          }
+        ],
+        sky: {
+          'sky-color': '#0d1527',
+          'sky-horizon-blend': 0.4,
+          'horizon-color': '#1f293d',
+          'horizon-fog-blend': 0.7,
+          'fog-color': '#0a0f1d',
+          'fog-ground-blend': 0.6
+        }
+      };
+
+      map = new maplibregl.Map({
+        container: 'map',
+        style: styleConfig,
+        center: [116.4223, 40.0375], // Beijing start point
+        zoom: 12,
+        pitch: 65,
+        bearing: 310,
+        maxPitch: 85,
+        antialias: true
+      });
+
+      map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+
+      map.on('load', () => {
+        // Enable true 3D terrain
+        try {
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+        } catch (e) {
+          console.warn("Terrain activation notice:", e);
+        }
+
+        // Add Route GeoJSON Sources & Layers
+        initTrajectoryLayers();
+        initVehicleMarker();
+        initPOIMarkers();
+        renderElevationProfile();
+        initUI();
+
+        // Fit initial camera
+        fitMasterRoute();
+      });
+    }
+
+    /**
+     * Trajectory Layers (Full, Traveled, Upcoming)
+     */
+    function initTrajectoryLayers() {
+      // 1. Full Master Track Line coordinates
+      const fullCoords = points.map(p => [p[0], p[1], p[2]]);
+
+      // Elevation gradient expressions for track coloring
+      map.addSource('full-route-source', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: fullCoords
+          }
+        }
+      });
+
+      // Ambient Full Route Halo
+      map.addLayer({
+        id: 'full-route-glow',
+        type: 'line',
+        source: 'full-route-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': 'rgba(6, 182, 212, 0.35)',
+          'line-width': 8,
+          'line-blur': 4
+        }
+      });
+
+      // Master line with neon elevation-colored look
+      map.addLayer({
+        id: 'full-route-line',
+        type: 'line',
+        source: 'full-route-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#06b6d4',
+          'line-width': 3,
+          'line-opacity': 0.8
+        }
+      });
+
+      // 2. Traveled Past Segment (Golden Amber Ribbon)
+      map.addSource('traveled-source', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [fullCoords[0], fullCoords[1]]
+          }
+        }
+      });
+
+      map.addLayer({
+        id: 'traveled-line-glow',
+        type: 'line',
+        source: 'traveled-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#f59e0b',
+          'line-width': 10,
+          'line-blur': 6,
+          'line-opacity': 0.7
+        }
+      });
+
+      map.addLayer({
+        id: 'traveled-line',
+        type: 'line',
+        source: 'traveled-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#ffedd5',
+          'line-width': 4,
+          'line-opacity': 0.95
+        }
+      });
+    }
+
+    /**
+     * 3D Vehicle Marker Setup
+     */
+    function initVehicleMarker() {
+      const el = document.createElement('div');
+      el.className = 'vehicle-marker';
+      el.innerHTML = `
+        <div class="vehicle-ripple"></div>
+        <div class="vehicle-beam" id="vehicleBeam"></div>
+        <div class="vehicle-body" id="vehicleBody">
+          <div class="vehicle-arrow"></div>
+        </div>
+      `;
+
+      const startPt = points[0];
+      vehicleMarker = new maplibregl.Marker({
+        element: el,
+        rotationAlignment: 'map',
+        pitchAlignment: 'map'
+      })
+      .setLngLat([startPt[0], startPt[1]])
+      .addTo(map);
+    }
+
+    /**
+     * Milestone POI Markers Setup
+     */
+    function initPOIMarkers() {
+      pois.forEach(poi => {
+        const el = document.createElement('div');
+        el.className = 'poi-marker';
+        el.innerHTML = `
+          <div class="poi-bubble">
+            <span>🚩</span>
+            <span>${poi.name}</span>
+            <span style="color: var(--accent-gold); font-family: 'JetBrains Mono'; font-size: 10px;">${poi.ele}m</span>
+          </div>
+          <div class="poi-pin-dot"></div>
+        `;
+
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          map.flyTo({
+            center: [poi.lon, poi.lat],
+            zoom: 13.5,
+            pitch: 65,
+            bearing: 45,
+            duration: 2500
+          });
+          showToast(`🚩 ${poi.name}: ${poi.desc}`);
+        });
+
+        const m = new maplibregl.Marker({
+          element: el,
+          anchor: 'bottom'
+        })
+        .setLngLat([poi.lon, poi.lat])
+        .addTo(map);
+
+        poiMarkers.push(m);
+      });
+    }
+
+    /**
+     * UI & Itinerary List Generation
+     */
+    function initUI() {
+      const container = document.getElementById('dayListContainer');
+      container.innerHTML = '';
+
+      legs.forEach((leg, idx) => {
+        const card = document.createElement('div');
+        card.className = `day-card ${idx === 0 ? 'active' : ''}`;
+        card.id = `dayCard-${idx}`;
+        card.innerHTML = `
+          <div class="card-top">
+            <span class="day-badge">DAY ${leg.day}</span>
+            <span class="day-date">${leg.date_short}</span>
+          </div>
+          <div class="day-route-title">${leg.title}</div>
+          <div style="font-size: 11px; color: #cbd5e1; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            ${leg.route}
+          </div>
+          <div class="day-stats-row">
+            <span>里程: <strong class="km">${leg.dist_km}km</strong></span>
+            <span>海拔: ${leg.min_ele}m ~ ${leg.max_ele}m</span>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          selectLeg(idx);
+        });
+
+        container.appendChild(card);
+      });
+
+      // Table for modal
+      const tbody = document.getElementById('legsTableBody');
+      tbody.innerHTML = `
+        <thead>
+          <tr>
+            <th>序号</th>
+            <th>日期</th>
+            <th>路线概况</th>
+            <th>公路</th>
+            <th>里程</th>
+            <th>平均时速</th>
+            <th>海拔区间</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${legs.map((l, i) => `
+            <tr>
+              <td><span class="day-badge">D${l.day}</span></td>
+              <td style="font-family: 'JetBrains Mono';">${l.date_short}</td>
+              <td><strong>${l.title}</strong><br><small style="color: var(--text-muted);">${l.route}</small></td>
+              <td><span style="color: var(--accent-cyan);">${l.highway.split('（')[0]}</span></td>
+              <td style="font-family: 'JetBrains Mono'; font-weight: 700; color: var(--accent-gold);">${l.dist_km} km</td>
+              <td style="font-family: 'JetBrains Mono';">${l.avg_spd} km/h</td>
+              <td style="font-family: 'JetBrains Mono';">${l.min_ele}m ~ ${l.max_ele}m</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      `;
+
+      updateHUD();
+    }
+
+    /**
+     * Elevation Profile Canvas Rendering
+     */
+    function renderElevationProfile() {
+      const canvas = document.getElementById('elevation-canvas');
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      const w = rect.width;
+      const h = rect.height;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Min/Max elevation in full route
+      const minE = -60;
+      const maxE = 4000;
+
+      // Draw background grid lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      [0, 1000, 2000, 3000].forEach(ele => {
+        const y = h - ((ele - minE) / (maxE - minE)) * (h - 10) - 5;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.font = '9px "JetBrains Mono"';
+        ctx.fillText(`${ele}m`, 4, y - 2);
+      });
+
+      // Build elevation area path
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+
+      for (let i = 0; i < totalPoints; i++) {
+        const pt = points[i];
+        const x = (i / (totalPoints - 1)) * w;
+        const ele = pt[2];
+        const y = h - ((ele - minE) / (maxE - minE)) * (h - 10) - 5;
+        ctx.lineTo(x, y);
+      }
+
+      ctx.lineTo(w, h);
+      ctx.closePath();
+
+      // Elevation gradient fill
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, 'rgba(168, 85, 247, 0.85)'); // Purple for high plateaus
+      grad.addColorStop(0.3, 'rgba(249, 115, 22, 0.7)'); // Orange
+      grad.addColorStop(0.65, 'rgba(245, 158, 11, 0.55)'); // Gold
+      grad.addColorStop(1, 'rgba(16, 185, 129, 0.3)'); // Green
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Top ridge curve line
+      ctx.beginPath();
+      for (let i = 0; i < totalPoints; i++) {
+        const pt = points[i];
+        const x = (i / (totalPoints - 1)) * w;
+        const ele = pt[2];
+        const y = h - ((ele - minE) / (maxE - minE)) * (h - 10) - 5;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Mark Key Summits & Basins
+      const keyLandmarks = [
+        { name: "北京 44m", idx: 0 },
+        { name: "吐鲁番 -42m", idx: Math.floor(totalPoints * 0.28) },
+        { name: "阿尔金山口 3534m", idx: Math.floor(totalPoints * 0.52) },
+        { name: "橡皮山 3779m", idx: Math.floor(totalPoints * 0.68) },
+        { name: "西宁 2260m", idx: Math.floor(totalPoints * 0.75) },
+        { name: "北京终点", idx: totalPoints - 1 }
+      ];
+
+      keyLandmarks.forEach(item => {
+        const x = (item.idx / (totalPoints - 1)) * w;
+        const pt = points[item.idx];
+        const y = h - ((pt[2] - minE) / (maxE - minE)) * (h - 10) - 5;
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+        ctx.font = '8px "Noto Sans SC"';
+        ctx.fillText(item.name, Math.min(x + 3, w - 50), Math.max(y - 5, 12));
+      });
+    }
+
+    window.addEventListener('resize', () => {
+      renderElevationProfile();
+    });
+
+    /**
+     * Animation Loop & Playback Engine
+     */
+    function startAnimation() {
+      if (!isPlaying) return;
+
+      const now = performance.now();
+      if (!lastAnimTimestamp) lastAnimTimestamp = now;
+      const deltaSec = (now - lastAnimTimestamp) / 1000.0;
+      lastAnimTimestamp = now;
+
+      // Calculate step advancement
+      // Points per second based on playback speed multiplier
+      // baseline: 15 points per second at 1x
+      const step = Math.max(1, Math.round(18 * (currentSpeed / 50) * (deltaSec / 0.016)));
+
+      currentIndex += step;
+
+      if (currentIndex >= totalPoints - 1) {
+        currentIndex = totalPoints - 1;
+        pauseAnimation();
+        showToast("🎉 恭喜！8,015公里西北大环线巡航圆满凯旋！");
+      }
+
+      updatePosition(currentIndex);
+
+      if (isPlaying) {
+        requestAnimationFrame(startAnimation);
+      }
+    }
+
+    function togglePlay() {
+      if (isPlaying) {
+        pauseAnimation();
+      } else {
+        playAnimation();
+      }
+    }
+
+    function playAnimation() {
+      if (currentIndex >= totalPoints - 1) {
+        currentIndex = 0;
+      }
+      isPlaying = true;
+      lastAnimTimestamp = performance.now();
+      document.getElementById('btnPlay').innerHTML = '⏸';
+      document.getElementById('hud-live-tag').innerHTML = '● 巡航中';
+      document.getElementById('hud-live-tag').style.color = 'var(--accent-green)';
+      requestAnimationFrame(startAnimation);
+    }
+
+    function pauseAnimation() {
+      isPlaying = false;
+      document.getElementById('btnPlay').innerHTML = '▶';
+      document.getElementById('hud-live-tag').innerHTML = '❚❚ 已暂停';
+      document.getElementById('hud-live-tag').style.color = 'var(--accent-gold)';
+    }
+
+    function setSpeed(spd) {
+      currentSpeed = spd;
+      document.querySelectorAll('.speed-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.trim() === `${spd}x`);
+      });
+      showToast(`⚡ 播放速率调整为 ${spd} 倍速`);
+    }
+
+    /**
+     * Update Position, Car Marker, Traveled Ribbon & Camera
+     */
+    function updatePosition(idx) {
+      if (idx < 0 || idx >= totalPoints) return;
+
+      const pt = points[idx];
+      const [lon, lat, ele, timeSec, cumKm, speed, legIdx] = pt;
+
+      // Calculate heading
+      const nextPt = points[Math.min(idx + 1, totalPoints - 1)];
+      let heading = 0;
+      if (nextPt) {
+        const dLon = (nextPt[0] - lon) * Math.PI / 180;
+        const lat1 = lat * Math.PI / 180;
+        const lat2 = nextPt[1] * Math.PI / 180;
+        const y = Math.sin(dLon) * Math.cos(lat2);
+        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+        heading = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+      }
+
+      if (isLeafletMode) {
+        if (leafletVehicleMarker) {
+          leafletVehicleMarker.setLatLng([lat, lon]);
+          const bodyEl = document.getElementById('vehicleBody');
+          if (bodyEl) bodyEl.style.transform = `rotate(${heading}deg)`;
+          const beamEl = document.getElementById('vehicleBeam');
+          if (beamEl) beamEl.style.transform = `rotate(${heading}deg)`;
+        }
+        if (leafletTraveledPolyline) {
+          const traveledLatLngs = points.slice(0, idx + 1).map(p => [p[1], p[0]]);
+          leafletTraveledPolyline.setLatLngs(traveledLatLngs);
+        }
+        if (cameraMode === 'chase' || cameraMode === 'drone') {
+          leafletMap.panTo([lat, lon], { animate: false });
+        }
+      } else if (map) {
+        if (vehicleMarker) {
+          vehicleMarker.setLngLat([lon, lat]);
+          const bodyEl = document.getElementById('vehicleBody');
+          if (bodyEl) bodyEl.style.transform = `rotate(${heading}deg)`;
+          const beamEl = document.getElementById('vehicleBeam');
+          if (beamEl) beamEl.style.transform = `rotate(${heading}deg)`;
+        }
+        const traveledCoords = points.slice(0, idx + 1).map(p => [p[0], p[1], p[2]]);
+        if (map.getSource('traveled-source')) {
+          map.getSource('traveled-source').setData({
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: traveledCoords.length > 1 ? traveledCoords : [[lon, lat], [lon, lat]]
+            }
+          });
+        }
+        updateCamera(lon, lat, ele, heading);
+      }
+
+      updateHUD();
+      updateScrubber(idx);
+      return;
+    }
+
+    function updateCamera(lon, lat, ele, heading) {
+      if (!map) return;
+
+      if (cameraMode === 'chase') {
+        map.jumpTo({
+          center: [lon, lat],
+          zoom: 13.8,
+          pitch: 68,
+          bearing: heading
+        });
+      } else if (cameraMode === 'drone') {
+        map.jumpTo({
+          center: [lon, lat],
+          zoom: 11.5,
+          pitch: 52,
+          bearing: (heading + 30) % 360
+        });
+      } else if (cameraMode === 'orbit') {
+        orbitAngle = (orbitAngle + 0.4) % 360;
+        map.jumpTo({
+          center: [lon, lat],
+          zoom: 12.8,
+          pitch: 62,
+          bearing: orbitAngle
+        });
+      }
+      // 'overview' doesn't auto-jump
+    }
+
+    function setCameraMode(mode) {
+      cameraMode = mode;
+      document.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
+      const activeBtn = document.getElementById(`cam-${mode}`);
+      if (activeBtn) activeBtn.classList.add('active');
+
+      if (mode === 'overview') {
+        fitMasterRoute();
+      } else {
+        const pt = points[currentIndex];
+        updateCamera(pt[0], pt[1], pt[2], 0);
+      }
+    }
+
+    function fitMasterRoute() {
+      if (isLeafletMode && leafletMap) {
+        leafletMap.fitBounds([[36.0, 87.0], [44.5, 117.5]], { padding: [60, 60] });
+        showToast("🗺️ 展开8,015公里西北大环线全景视图");
+        return;
+      }
+      if (!map) return;
+      // Northwest China bbox bounds: [86, 36] to [117, 44]
+      map.fitBounds([
+        [87.0, 36.5],
+        [117.2, 44.2]
+      ], {
+        padding: { top: 90, bottom: 220, left: 340, right: 320 },
+        pitch: 42,
+        bearing: 0,
+        duration: 2000
+      });
+      showToast("🗺️ 展开8,015公里西北大环线全景视图");
+    }
+
+    /**
+     * Telemetry & HUD Updates
+     */
+    function updateHUD() {
+      const pt = points[currentIndex];
+      const [lon, lat, ele, timeSec, cumKm, speed, legIdx] = pt;
+      const leg = legs[legIdx] || legs[0];
+
+      // Gauges
+      document.getElementById('gauge-speed').textContent = Math.round(speed || 80);
+      document.getElementById('gauge-ele').textContent = Math.round(ele);
+
+      // Header info
+      document.getElementById('hud-clock').textContent = formatTimeCST(timeSec);
+      document.getElementById('hud-leg-title').textContent = `D${leg.day} · ${leg.title}`;
+      document.getElementById('hud-total-km').textContent = `${cumKm.toFixed(1)} / 8,015 km`;
+
+      // Current Location description
+      document.getElementById('loc-highway-label').textContent = `${leg.date_short} · ${leg.highway.split('（')[0]}`;
+      document.getElementById('loc-name-text').textContent = leg.route.split('→')[0].trim();
+      document.getElementById('loc-desc-text').textContent = leg.desc;
+
+      // Timeline labels
+      document.getElementById('time-current-text').textContent = formatTimeCST(timeSec);
+      const pct = ((cumKm / 8014.9) * 100).toFixed(1);
+      document.getElementById('dist-progress-text').textContent = `${cumKm.toFixed(1)} km / 8,014.9 km (${pct}%)`;
+
+      // Highlight active day in drawer
+      document.querySelectorAll('.day-card').forEach((c, i) => {
+        c.classList.toggle('active', i === legIdx);
+      });
+    }
+
+    function updateScrubber(idx) {
+      const pct = (idx / (totalPoints - 1)) * 100;
+      document.getElementById('timelineProgress').style.width = `${pct}%`;
+
+      // Scrubber line in elevation chart
+      const chartScrubber = document.getElementById('chartScrubber');
+      if (chartScrubber) {
+        chartScrubber.style.left = `${pct}%`;
+      }
+    }
+
+    /**
+     * Timeline & Chart Interaction Handlers
+     */
+    function handleTimelineClick(e) {
+      const track = document.getElementById('timelineTrack');
+      const rect = track.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      currentIndex = Math.floor(pct * (totalPoints - 1));
+      updatePosition(currentIndex);
+    }
+
+    function handleChartClick(e) {
+      const container = document.getElementById('elevation-chart-container');
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      currentIndex = Math.floor(pct * (totalPoints - 1));
+      updatePosition(currentIndex);
+    }
+
+    function handleChartHover(e) {
+      const container = document.getElementById('elevation-chart-container');
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      const idx = Math.floor(pct * (totalPoints - 1));
+      const pt = points[idx];
+
+      const cursor = document.getElementById('chartCursor');
+      cursor.style.display = 'block';
+      cursor.style.left = `${x}px`;
+
+      document.getElementById('profile-hover-val').textContent =
+        `里程: ${pt[4]} km | 海拔: ${pt[2]} m | ${formatTimeCST(pt[3])}`;
+    }
+
+    function handleChartLeave() {
+      document.getElementById('chartCursor').style.display = 'none';
+      document.getElementById('profile-hover-val').textContent = '悬停或点击剖面可跳转';
+    }
+
+    /**
+     * Day Selection & Navigation
+     */
+    function selectLeg(legIdx) {
+      const leg = legs[legIdx];
+      currentIndex = leg.start_idx;
+      updatePosition(currentIndex);
+
+      if (isLeafletMode && leafletMap) {
+        leafletMap.flyTo([leg.start_coord[1], leg.start_coord[0]], 9, { duration: 1.5 });
+        showToast(`🚗 切换至 Day ${leg.day}: ${leg.title}`);
+        return;
+      }
+
+      // Fly camera to day start with smooth transition
+      if (map) map.flyTo({
+        center: [leg.start_coord[0], leg.start_coord[1]],
+        zoom: 12.5,
+        pitch: 65,
+        bearing: 320,
+        duration: 2000
+      });
+
+      showToast(`🚗 切换至 Day ${leg.day}: ${leg.title}`);
+    }
+
+    function nextLeg() {
+      const currentLegIdx = points[currentIndex][6];
+      const nextIdx = Math.min(legs.length - 1, currentLegIdx + 1);
+      selectLeg(nextIdx);
+    }
+
+    function prevLeg() {
+      const currentLegIdx = points[currentIndex][6];
+      const prevIdx = Math.max(0, currentLegIdx - 1);
+      selectLeg(prevIdx);
+    }
+
+    /**
+     * Map Style & Terrain Controls
+     */
+    function switchMapStyle(styleType) {
+      currentMapStyle = styleType;
+      document.getElementById('btn-style-sat').classList.toggle('active', styleType === 'satellite');
+      document.getElementById('btn-style-topo').classList.toggle('active', styleType === 'topo');
+      document.getElementById('btn-style-dark').classList.toggle('active', styleType === 'dark');
+
+      if (isLeafletMode && leafletMap) {
+        if (leafletTileLayer) leafletMap.removeLayer(leafletTileLayer);
+        let tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+        if (styleType === 'topo') {
+          tileUrl = 'https://tile.opentopomap.org/{z}/{x}/{y}.png';
+        } else if (styleType === 'dark') {
+          tileUrl = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
+        }
+        leafletTileLayer = L.tileLayer(tileUrl, { maxZoom: 18 }).addTo(leafletMap);
+        showToast(`🗺️ 底图已切换为：${styleType === 'satellite' ? '高清卫星实景' : styleType === 'topo' ? '等高地形图' : '暗夜赛博'}`);
+        return;
+      }
+
+      if (!map) return;
+      map.setLayoutProperty('basemap-satellite', 'visibility', styleType === 'satellite' ? 'visible' : 'none');
+      map.setLayoutProperty('basemap-topo', 'visibility', styleType === 'topo' ? 'visible' : 'none');
+      map.setLayoutProperty('basemap-dark', 'visibility', styleType === 'dark' ? 'visible' : 'none');
+
+      showToast(`🗺️ 底图已切换为：${styleType === 'satellite' ? '高清卫星实景' : styleType === 'topo' ? '等高地形图' : '暗夜赛博'}`);
+    }
+
+    function updateTerrainExaggeration(val) {
+      document.getElementById('terrain-val-label').textContent = `${val}x`;
+      if (map) {
+        try {
+          map.setTerrain({ source: 'terrain-dem', exaggeration: parseFloat(val) });
+        } catch (e) {}
+      }
+    }
+
+    /**
+     * Drawer & Modal Controls
+     */
+    function toggleDrawer() {
+      const drawer = document.getElementById('itineraryDrawer');
+      drawer.classList.toggle('collapsed');
+      document.getElementById('drawerToggleIcon').textContent = drawer.classList.contains('collapsed') ? '▶' : '◀';
+    }
+
+    function openStatsModal() {
+      document.getElementById('statsModal').classList.add('active');
+    }
+
+    function closeStatsModal() {
+      document.getElementById('statsModal').classList.remove('active');
+    }
+
+    function closeModalOnBg(e) {
+      if (e.target.id === 'statsModal') closeStatsModal();
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2800);
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+
+    function captureScreen() {
+      if (!map) return;
+      showToast("📸 正在生成高清截屏...");
+      setTimeout(() => {
+        try {
+          const canvas = map.getCanvas();
+          const imgUrl = canvas.toDataURL('image/png');
+          const a = document.createElement('a');
+          a.download = `3D轨迹_西北自驾_${formatTimeCST(points[currentIndex][3]).replace(/[: ]/g, '_')}.png`;
+          a.href = imgUrl;
+          a.click();
+          showToast("✅ 截屏已成功保存！");
+        } catch (e) {
+          showToast("⚠️ 截屏受安全限制，请使用浏览器快捷键截图");
+        }
+      }, 200);
+    }
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'ArrowRight') {
+        currentIndex = Math.min(totalPoints - 1, currentIndex + 50);
+        updatePosition(currentIndex);
+      } else if (e.code === 'ArrowLeft') {
+        currentIndex = Math.max(0, currentIndex - 50);
+        updatePosition(currentIndex);
+      }
+    });
+
+    // Start App
+    window.addEventListener('DOMContentLoaded', initMap);
+  </script>
+</body>
+</html>

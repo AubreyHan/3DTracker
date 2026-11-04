@@ -1,0 +1,11 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Temporary work & tile cache directories
+track_work/
+.agents/skills/3d-track-animation/cache/
+.agents/skills/3d-track-animation/scripts/bin/
+
+# Large rendered video outputs (>100MB GitHub limit)
+output/*.mp4
