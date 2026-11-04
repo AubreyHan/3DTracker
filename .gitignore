@@ -6,3 +6,6 @@ __pycache__/
 track_work/
 .agents/skills/3d-track-animation/cache/
 .agents/skills/3d-track-animation/scripts/bin/
+
+# Auto-sync log file
+sync.log
