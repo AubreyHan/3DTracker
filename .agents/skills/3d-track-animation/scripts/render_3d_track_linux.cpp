@@ -824,8 +824,6 @@ int main(int argc, char* argv[]) {
     quads.reserve(GNX * GNY);
 
     std::vector<float> smooth_lbl_alpha(labels.size(), 0.0f);
-    std::vector<float> smooth_lbl_sx(labels.size(), -9999.0f);
-    std::vector<float> smooth_lbl_sy(labels.size(), -9999.0f);
 
     for (int f = 0; f < TOTAL_FRAMES; ++f) {
         double t_sec = static_cast<double>(f) / FPS;
@@ -988,18 +986,19 @@ int main(int argc, char* argv[]) {
                         } else {
                             float dp_scale = static_cast<float>(z_scale_factor);
                             // Stable forward reading window:
-                            // Visible from 2600px ahead, fades out smoothly as vehicle reaches it (< 180px),
-                            // preventing labels from rapidly whipping across or off the screen!
-                            if (dp <= 2600.0f * dp_scale && dp >= 80.0f * dp_scale) {
+                            // Visible from 2800px ahead (~10km) right up until the vehicle passes it!
+                            // Vehicle depth relative to camera is ~95 * dp_scale (~380px).
+                            // Fades out gently only as vehicle actually passes it (dp < 90 * dp_scale down to 35 * dp_scale)
+                            if (dp <= 2800.0f * dp_scale && dp >= 35.0f * dp_scale) {
                                 float fade_dist = 1.0f;
                                 if (dp > 1800.0f * dp_scale) {
-                                    fade_dist = std::clamp((2600.0f * dp_scale - dp) / (800.0f * dp_scale), 0.0f, 1.0f);
-                                } else if (dp < 200.0f * dp_scale) {
-                                    fade_dist = std::clamp((dp - 80.0f * dp_scale) / (120.0f * dp_scale), 0.0f, 1.0f);
+                                    fade_dist = std::clamp((2800.0f * dp_scale - dp) / (1000.0f * dp_scale), 0.0f, 1.0f);
+                                } else if (dp < 90.0f * dp_scale) {
+                                    fade_dist = std::clamp((dp - 35.0f * dp_scale) / (55.0f * dp_scale), 0.0f, 1.0f);
                                 }
 
-                                // Soft screen edge fade: if milestone approaches left/right screen edges, gently fade out
-                                float fade_edge = std::clamp(std::min(sx - 45.0f, W - 45.0f - sx) / 85.0f, 0.0f, 1.0f);
+                                // Soft screen edge fade: if milestone approaches screen borders, gently fade out
+                                float fade_edge = std::clamp(std::min({sx - 35.0f, W - 35.0f - sx, sy - 25.0f, H - 20.0f - sy}) / 45.0f, 0.0f, 1.0f);
                                 target_alpha = fade_dist * fade_edge;
                             }
                         }
@@ -1007,20 +1006,12 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Smooth exponential fade (eliminates sudden popping in / popping out and flickering)
-                smooth_lbl_alpha[li] = smooth_lbl_alpha[li] * 0.90f + target_alpha * 0.10f;
+                smooth_lbl_alpha[li] = smooth_lbl_alpha[li] * 0.88f + target_alpha * 0.12f;
 
                 if (smooth_lbl_alpha[li] > 0.02f) {
-                    // Continuous sub-pixel coordinate tracking without abrupt snapping
-                    if (smooth_lbl_sx[li] < -9000.0f) {
-                        smooth_lbl_sx[li] = sx;
-                        smooth_lbl_sy[li] = sy;
-                    } else {
-                        smooth_lbl_sx[li] = smooth_lbl_sx[li] * 0.40f + sx * 0.60f;
-                        smooth_lbl_sy[li] = smooth_lbl_sy[li] * 0.40f + sy * 0.60f;
-                    }
-
-                    int dst_x = static_cast<int>(std::round(smooth_lbl_sx[li] - lbl.anchor_x));
-                    int dst_y = static_cast<int>(std::round(smooth_lbl_sy[li] - lbl.anchor_y));
+                    // Direct 3D ground-pinned anchor coordinate (rock-solid, zero lag, zero rubber-banding)
+                    int dst_x = static_cast<int>(std::round(sx - lbl.anchor_x));
+                    int dst_y = static_cast<int>(std::round(sy - lbl.anchor_y));
 
                     for (int ly = 0; ly < lbl.h; ++ly) {
                         int cy = dst_y + ly;
@@ -1036,9 +1027,6 @@ int main(int argc, char* argv[]) {
                             }
                         }
                     }
-                } else {
-                    smooth_lbl_sx[li] = -9999.0f;
-                    smooth_lbl_sy[li] = -9999.0f;
                 }
             }
         }
