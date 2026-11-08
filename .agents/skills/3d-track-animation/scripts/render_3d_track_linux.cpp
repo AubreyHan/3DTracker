@@ -576,9 +576,10 @@ int main(int argc, char* argv[]) {
         rx0 = std::min(rx0, p.px); rx1 = std::max(rx1, p.px);
         ry0 = std::min(ry0, p.py); ry1 = std::max(ry1, p.py);
     }
+    double z_scale_factor = std::pow(2.0, std::max(0, z - 15));
     double route_span = std::max(300.0, std::max(rx1 - rx0, ry1 - ry0));
     double ele_span = std::max(8.0, max_ele - min_ele);
-    double target_relief = std::clamp(route_span * 0.075, 45.0, 95.0);
+    double target_relief = std::clamp(route_span * 0.075, 45.0 * z_scale_factor, 140.0 * z_scale_factor);
     double z_scale = target_relief / ele_span;
     double route_z_scale = z_scale * 0.62;
 
@@ -706,8 +707,8 @@ int main(int argc, char* argv[]) {
 
     // Cruising (Follow) Camera: 48°-52° tilt to keep 100% terrain coverage from row 0 to row H-1
     double follow_pitch = (is_portrait ? 52.0 : 48.0) * M_PI / 180.0;
-    double follow_alt   = is_portrait ? 160.0 : 130.0;
-    double follow_dist  = is_portrait ? 110.0 : 100.0;
+    double follow_alt   = (is_portrait ? 160.0 : 130.0) * z_scale_factor;
+    double follow_dist  = (is_portrait ? 110.0 : 100.0) * z_scale_factor;
 
     // Open ffmpeg pipe
     std::ostringstream cmd;
@@ -917,12 +918,13 @@ int main(int argc, char* argv[]) {
                         if (is_overview) {
                             if (lbl.overview) target_alpha = 0.95f;
                         } else {
-                            if (dp <= 3000.0f && dp >= 20.0f) {
+                            float dp_scale = static_cast<float>(z_scale_factor);
+                            if (dp <= 3000.0f * dp_scale && dp >= 20.0f * dp_scale) {
                                 float fade = 1.0f;
-                                if (dp > 2000.0f) {
-                                    fade = std::clamp((3000.0f - dp) / 1000.0f, 0.0f, 1.0f);
-                                } else if (dp < 45.0f) {
-                                    fade = std::clamp((dp - 20.0f) / 25.0f, 0.0f, 1.0f);
+                                if (dp > 2000.0f * dp_scale) {
+                                    fade = std::clamp((3000.0f * dp_scale - dp) / (1000.0f * dp_scale), 0.0f, 1.0f);
+                                } else if (dp < 45.0f * dp_scale) {
+                                    fade = std::clamp((dp - 20.0f * dp_scale) / (25.0f * dp_scale), 0.0f, 1.0f);
                                 }
                                 target_alpha = fade;
                             }

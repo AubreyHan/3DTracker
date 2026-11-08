@@ -57,6 +57,7 @@ def find_cjk_font(size):
 
 def prepare_with_pil(td, res_dir, out_dir):
     from PIL import Image, ImageDraw, ImageEnhance
+    Image.MAX_IMAGE_PIXELS = None
 
     z = int(td['z'])
     x_min, x_max = int(td['x_min']), int(td['x_max'])
@@ -81,16 +82,6 @@ def prepare_with_pil(td, res_dir, out_dir):
                     mosaic.paste(im, ((tx - x_min) * 256, (ty - y_min) * 256))
                 except Exception:
                     pass
-
-    # Save grayscale darkened minimap mosaic BEFORE compositing road labels
-    gray = mosaic.convert('L')
-    gray_rgb = Image.merge('RGBA', (
-        gray.point(lambda v: int(v * 0.62)),
-        gray.point(lambda v: int(v * 0.64)),
-        gray.point(lambda v: int(v * 0.66)),
-        Image.new('L', (mw, mh), 255)
-    ))
-    write_rgba_file(os.path.join(out_dir, "mosaic_gray.rgba"), mw, mh, gray_rgb.tobytes())
 
     # Composite road network overlay (highways, expressways, national routes)
     # Using clean road vectors (ArcGIS World_Transportation) preserves crisp roads on the 3D ground mesh
