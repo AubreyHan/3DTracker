@@ -302,6 +302,47 @@ def generate_billboard_labels(td, out_dir):
                 pass
             break
 
+    local_pois = [
+        ("来广营", 40.0377, 116.4205, 2),
+        ("天通苑北", 40.0742, 116.4151, 2),
+        ("北七家", 40.1133, 116.4060, 2),
+        ("小汤山", 40.1709, 116.4015, 2),
+        ("马坊村", 40.1564, 116.4025, 2),
+        ("香屯村", 40.2003, 116.3976, 2),
+        ("兴寿", 40.2357, 116.4084, 2),
+        ("连山石村", 40.2668, 116.3945, 2),
+        ("下庄村", 40.2835, 116.3579, 2),
+        ("延寿寺", 40.2980, 116.3680, 2),
+        ("花果山村", 40.3129, 116.3346, 2),
+        ("慈悲峪村", 40.3382, 116.3457, 2),
+        ("北庄村", 40.3664, 116.3397, 2),
+        ("黑山烤房美食", 40.3677, 116.3148, 1),
+        ("黑山寨", 40.3534, 116.2973, 2),
+        ("东水峪村", 40.3264, 116.2698, 2),
+        ("明十三陵", 40.2837, 116.2357, 1),
+        ("景陵村", 40.2952, 116.2431, 2),
+        ("长陵", 40.3000, 116.2450, 2),
+        ("王庄村", 40.2580, 116.2187, 2),
+        ("昌平", 40.2238, 116.2012, 1),
+        ("七间房村", 40.2306, 116.1626, 2),
+        ("城北", 40.2167, 116.2133, 2),
+        ("白浮村", 40.1756, 116.2347, 2),
+        ("马池口", 40.1687, 116.2215, 2),
+        ("北庄户村", 40.1536, 116.2111, 2),
+        ("沙河", 40.1144, 116.2356, 2),
+        ("史各庄", 40.0837, 116.2764, 2),
+        ("东北旺村", 40.0452, 116.3037, 2),
+        ("西北旺", 40.0585, 116.2951, 2),
+        ("奥森公园", 40.0215, 116.3608, 2)
+    ]
+    for poi in local_pois:
+        if not any(g[0] == poi[0] for g in gazetteer):
+            gazetteer.append(poi)
+
+    dist_km = float(td.get('total_dist', 0.0)) / 1000.0
+    max_search_d = 65.0 if dist_km > 500.0 else (25.0 if dist_km > 200.0 else 8.5)
+    min_ov_spacing = 140.0 if dist_km > 1000.0 else (50.0 if dist_km > 300.0 else 11.0)
+
     # Sample track points every 6th point for fast distance check
     sub_pts = pts[::6] if len(pts) > 6 else pts
     selected = []
@@ -310,17 +351,17 @@ def generate_billboard_labels(td, out_dir):
         if name in seen_names:
             continue
         min_d = min(haversine_km(clat, clon, p['lat'], p['lon']) for p in sub_pts)
-        if min_d <= 65.0:
+        if min_d <= max_search_d:
             seen_names.add(name)
             selected.append({'name': name, 'lat': clat, 'lon': clon, 'tier': tier, 'dist': min_d})
 
-    # Greedily mark overview labels so they do not collide during overview shot (min ~150km apart for enlarged 2x badges)
+    # Greedily mark overview labels so they do not collide during overview shot
     selected.sort(key=lambda x: (x['tier'], x['dist']))
     overview_labels = []
     for item in selected:
         collides = False
         for ov in overview_labels:
-            if haversine_km(item['lat'], item['lon'], ov['lat'], ov['lon']) < 150.0:
+            if haversine_km(item['lat'], item['lon'], ov['lat'], ov['lon']) < min_ov_spacing:
                 collides = True
                 break
         if not collides:
@@ -413,11 +454,15 @@ def generate_billboard_labels(td, out_dir):
     with open(os.path.join(out_dir, "labels.json"), 'w', encoding='utf-8') as f:
         json.dump(labels_meta, f, ensure_ascii=False, indent=2)
 
-    # Dynamic flight timing: Ensure adequate viewing window (4~7s) for each city along the route
+    # Flight timing: Support explicit user-configured cruise duration or dynamic auto-scale
     dist_km = float(td.get('total_dist', 0.0)) / 1000.0
-    t_dist = 26.0 + 8.5 * math.log(1.0 + max(0.0, dist_km) / 10.0)
-    t_cities = max(25.0, len(labels_meta) * 1.5 + len(overview_labels) * 2.0)
-    cruise_sec = min(105.0, max(28.0, max(t_dist, t_cities)))
+    user_cruise = float(td.get('cruise_sec', 0.0))
+    if user_cruise >= 15.0:
+        cruise_sec = user_cruise
+    else:
+        t_dist = 26.0 + 8.5 * math.log(1.0 + max(0.0, dist_km) / 10.0)
+        t_cities = max(25.0, len(labels_meta) * 1.5 + len(overview_labels) * 2.0)
+        cruise_sec = min(120.0, max(28.0, max(t_dist, t_cities)))
     total_sec = cruise_sec + 14.5
     print(f"Generated {len(labels_meta)} screen-aligned billboard labels ({len(overview_labels)} overview) in atlas ({atlas.width}x{atlas.height}).")
     print(f"Dynamic Flight Timing : Dist={dist_km:.1f}km, Cities={len(labels_meta)} ({len(overview_labels)} ov) -> Cruise={cruise_sec:.1f}s, Total={total_sec:.1f}s")

@@ -153,7 +153,7 @@ def resolve_icon_mode(mode_str, avg_speed_kmh):
         return 2, f'自驾 (自动识别: 均速 {avg_speed_kmh:.1f} km/h)'
 
 
-def choose_optimal_zoom(lats, lons, use_gcj02):
+def choose_optimal_zoom(lats, lons, use_gcj02, forced_z=0):
     if use_gcj02:
         conv = [wgs84_to_gcj02(la, lo) for la, lo in zip(lats, lons)]
         min_lat = min(c[0] for c in conv)
@@ -174,17 +174,21 @@ def choose_optimal_zoom(lats, lons, use_gcj02):
     b_min_lon = max(-179.9, min_lon - lon_pad)
     b_max_lon = min(179.9, max_lon + lon_pad)
 
-    best_z = 12
-    for z in range(16, 5, -1):
-        tx0, ty1 = latlon_to_tile_frac(b_min_lat, b_min_lon, z)
-        tx1, ty0 = latlon_to_tile_frac(b_max_lat, b_max_lon, z)
-        x_min, x_max = int(math.floor(tx0)), int(math.floor(tx1))
-        y_min, y_max = int(math.floor(ty0)), int(math.floor(ty1))
-        cols = x_max - x_min + 1
-        rows = y_max - y_min + 1
-        if max(cols, rows) <= 32 and cols * rows <= 500:
-            best_z = z
-            break
+    if forced_z > 0:
+        best_z = forced_z
+    else:
+        best_z = 12
+        for z in range(16, 5, -1):
+            tx0, ty1 = latlon_to_tile_frac(b_min_lat, b_min_lon, z)
+            tx1, ty0 = latlon_to_tile_frac(b_max_lat, b_max_lon, z)
+            x_min, x_max = int(math.floor(tx0)), int(math.floor(tx1))
+            y_min, y_max = int(math.floor(ty0)), int(math.floor(ty1))
+            cols = x_max - x_min + 1
+            rows = y_max - y_min + 1
+            # Allow high-definition terrain (up to 1600 tiles) for much finer satellite detail
+            if max(cols, rows) <= 64 and cols * rows <= 1600:
+                best_z = z
+                break
 
     tx0, ty1 = latlon_to_tile_frac(b_min_lat, b_min_lon, best_z)
     tx1, ty0 = latlon_to_tile_frac(b_max_lat, b_max_lon, best_z)
@@ -543,6 +547,8 @@ def main():
     parser.add_argument("--no-check-continuity", action="store_false", dest="check_continuity", help="Disable continuity checking")
     parser.add_argument("--max-gap-km", type=float, default=5.0, help="Max distance gap in km before flagging a discontinuity (default: 5.0 km)")
     parser.add_argument("--ignore-discontinuity", "--force", action="store_true", help="Force proceed even if discontinuities are detected")
+    parser.add_argument("--zoom", type=int, default=0, help="Forced zoom level (e.g. 14 or 15)")
+    parser.add_argument("--cruise-sec", type=float, default=0.0, help="Forced cruise duration in seconds (e.g. 96.0)")
     args = parser.parse_args()
 
     os.makedirs(args.work_dir, exist_ok=True)
@@ -767,7 +773,7 @@ def main():
     # Keep use_gcj02 = False so GPS tracks align 100% physically with real roads without false shift!
     use_gcj02 = False
 
-    z, x_min, x_max, y_min, y_max = choose_optimal_zoom(lats, lons, use_gcj02)
+    z, x_min, x_max, y_min, y_max = choose_optimal_zoom(lats, lons, use_gcj02, forced_z=args.zoom)
 
     final_name = args.name.strip() if args.name and args.name.strip() else default_name
     eles = [p['ele'] for p in sampled]
@@ -816,6 +822,7 @@ def main():
         'total_desc': round(cum_desc, 1),
         'min_ele': round(min(eles), 1),
         'max_ele': round(max(eles), 1),
+        'cruise_sec': round(args.cruise_sec, 1) if args.cruise_sec > 0.0 else 0.0,
         'points': sampled
     }
 
