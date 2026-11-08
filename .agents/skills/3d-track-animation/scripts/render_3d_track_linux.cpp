@@ -175,10 +175,11 @@ struct Canvas {
         }
     }
 
+    // Perspective-correct texture mapping with sub-texel bilinear filtering
     void draw_textured_triangle(
-        float x0, float y0, float u0, float v0,
-        float x1, float y1, float u1, float v1,
-        float x2, float y2, float u2, float v2,
+        float x0, float y0, float z0, float u0, float v0,
+        float x1, float y1, float z1, float u1, float v1,
+        float x2, float y2, float z2, float u2, float v2,
         const ImageRGBA& tex, float shade, float haze
     ) {
         int min_x = std::max(0, static_cast<int>(std::floor(std::min({x0, x1, x2}))));
@@ -191,6 +192,13 @@ struct Canvas {
         if (std::abs(denom) < 1e-5f) return;
         float inv_d = 1.0f / denom;
 
+        float invz0 = 1.0f / std::max(1.0f, z0);
+        float invz1 = 1.0f / std::max(1.0f, z1);
+        float invz2 = 1.0f / std::max(1.0f, z2);
+
+        float u0_z = u0 * invz0, u1_z = u1 * invz1, u2_z = u2 * invz2;
+        float v0_z = v0 * invz0, v1_z = v1 * invz1, v2_z = v2 * invz2;
+
         for (int y = min_y; y <= max_y; ++y) {
             float py = y + 0.5f;
             uint8_t* row = &rgb[static_cast<size_t>(y) * w * 3];
@@ -200,8 +208,10 @@ struct Canvas {
                 float w1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) * inv_d;
                 float w2 = 1.0f - w0 - w1;
                 if (w0 >= -1e-4f && w1 >= -1e-4f && w2 >= -1e-4f) {
-                    double u = w0 * u0 + w1 * u1 + w2 * u2;
-                    double v = w0 * v0 + w1 * v1 + w2 * v2;
+                    float invz = w0 * invz0 + w1 * invz1 + w2 * invz2;
+                    float z_pix = 1.0f / std::max(1e-6f, invz);
+                    double u = (w0 * u0_z + w1 * u1_z + w2 * u2_z) * z_pix;
+                    double v = (w0 * v0_z + w1 * v1_z + w2 * v2_z) * z_pix;
                     uint8_t tr, tg, tb;
                     tex.sample_bilinear(u, v, tr, tg, tb);
                     float fr = tr * shade * (1.0f - haze) + bg_r * haze;
@@ -589,8 +599,8 @@ int main(int argc, char* argv[]) {
     }
     for (size_t i = 0; i < pts.size(); ++i) pts[i].pz_route = smooth_pz[i];
 
-    // Build 180x180 3D terrain mesh
-    const int NX = 180, NY = 180;
+    // Build high-density 3D terrain mesh (240x360) matching terrain aspect ratio
+    const int NX = 240, NY = 360;
     std::vector<float> hgrid((NX + 1) * (NY + 1), 0.0f);
     std::vector<float> sgrid((NX + 1) * (NY + 1), 1.0f);
     for (int j = 0; j <= NY; ++j) {
@@ -689,8 +699,8 @@ int main(int argc, char* argv[]) {
     double ov_pitch = (is_portrait ? 72.0 : 70.0) * M_PI / 180.0;
     double ov_yaw = 0.0; // Geographic North orientation
     double ov_alt = is_portrait
-        ? std::clamp(std::max(span_x / 0.58, span_y / 1.05) * 1.08, 700.0, 2200.0)
-        : std::clamp(std::max(span_x / 1.55, span_y / 0.85) * 1.12, 600.0, 1800.0);
+        ? std::max(std::max(span_x / 0.58, span_y / 1.05) * 1.08, 700.0)
+        : std::max(std::max(span_x / 1.55, span_y / 0.85) * 1.12, 600.0);
     double ov_cx = cx_mid;
     double ov_cy = cy_mid + ov_alt / std::tan(ov_pitch);
 
@@ -858,8 +868,8 @@ int main(int argc, char* argv[]) {
             float v0 = static_cast<float>(j * cell_h), v1 = static_cast<float>((j + 1) * cell_h);
             float sh = 0.25f * (sgrid[i00] + sgrid[i10] + sgrid[i01] + sgrid[i11]);
             float hz = static_cast<float>(std::clamp((q.depth - 900.0) / 3800.0, 0.0, 0.35));
-            canvas.draw_textured_triangle(vx[i00], vy[i00], u0, v0, vx[i10], vy[i10], u1, v0, vx[i11], vy[i11], u1, v1, mosaic_color, sh, hz);
-            canvas.draw_textured_triangle(vx[i00], vy[i00], u0, v0, vx[i11], vy[i11], u1, v1, vx[i01], vy[i01], u0, v1, mosaic_color, sh, hz);
+            canvas.draw_textured_triangle(vx[i00], vy[i00], vz[i00], u0, v0, vx[i10], vy[i10], vz[i10], u1, v0, vx[i11], vy[i11], vz[i11], u1, v1, mosaic_color, sh, hz);
+            canvas.draw_textured_triangle(vx[i00], vy[i00], vz[i00], u0, v0, vx[i11], vy[i11], vz[i11], u1, v1, vx[i01], vy[i01], vz[i01], u0, v1, mosaic_color, sh, hz);
         }
 
         // Draw 3D route clinging tightly to the ground (NO shadow, NO hover)
