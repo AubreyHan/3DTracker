@@ -519,6 +519,79 @@ static std::vector<BillboardLabel> load_labels_json(const std::string& path) {
     return list;
 }
 
+// Adaptive speed profiler: smoothly decelerates flight speed near each milestone/landmark
+// Gives viewers a relaxed 8~12 second window to read place names without signs rushing past
+struct SpeedProfiler {
+    std::vector<double> s_samples;
+    std::vector<double> tau_samples;
+    int M = 4000;
+
+    void init(double total_dist, const std::vector<BillboardLabel>& labels, const std::vector<TrackPt>& pts) {
+        if (total_dist <= 0 || pts.empty()) return;
+
+        // Precompute route distance for each label
+        std::vector<double> lbl_dists;
+        for (const auto& lbl : labels) {
+            double best_d2 = 1e18;
+            double best_dist = 0.0;
+            for (const auto& p : pts) {
+                double dx = p.px - lbl.px;
+                double dy = p.py - lbl.py;
+                double d2 = dx * dx + dy * dy;
+                if (d2 < best_d2) {
+                    best_d2 = d2;
+                    best_dist = p.dist;
+                }
+            }
+            lbl_dists.push_back(best_dist);
+        }
+
+        s_samples.resize(M);
+        std::vector<double> v_samples(M, 1.0);
+        double ds = total_dist / (M - 1);
+        const double sigma = 1800.0; // ~1.8km smooth deceleration radius
+
+        for (int i = 0; i < M; ++i) {
+            double s = i * ds;
+            s_samples[i] = s;
+            double min_v = 1.0;
+            for (double s_lbl : lbl_dists) {
+                double diff = (s - s_lbl) / sigma;
+                // Gaussian deceleration dip down to 0.22 (speed drops by 78% when passing milestone)
+                double dip = 0.78 * std::exp(-0.5 * diff * diff);
+                double v = 1.0 - dip;
+                if (v < min_v) min_v = v;
+            }
+            v_samples[i] = std::clamp(min_v, 0.22, 1.0);
+        }
+
+        std::vector<double> t_cum(M, 0.0);
+        for (int i = 1; i < M; ++i) {
+            double avg_v = 0.5 * (v_samples[i - 1] + v_samples[i]);
+            t_cum[i] = t_cum[i - 1] + ds / avg_v;
+        }
+
+        double total_t = t_cum.back();
+        tau_samples.resize(M);
+        for (int i = 0; i < M; ++i) {
+            tau_samples[i] = t_cum[i] / total_t;
+        }
+    }
+
+    double get_dist(double u) const {
+        if (tau_samples.empty() || s_samples.empty()) return u;
+        u = std::clamp(u, 0.0, 1.0);
+        auto it = std::lower_bound(tau_samples.begin(), tau_samples.end(), u);
+        if (it == tau_samples.begin()) return s_samples.front();
+        if (it == tau_samples.end()) return s_samples.back();
+        int idx = static_cast<int>(std::distance(tau_samples.begin(), it));
+        double t0 = tau_samples[idx - 1];
+        double t1 = tau_samples[idx];
+        double frac = (t1 > t0) ? (u - t0) / (t1 - t0) : 0.0;
+        return s_samples[idx - 1] * (1.0 - frac) + s_samples[idx] * frac;
+    }
+};
+
 int main(int argc, char* argv[]) {
     std::string json_path, assets_dir, out_mp4;
     int W = 1280, H = 720;
@@ -676,6 +749,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Initialize adaptive milestone deceleration profiler
+    SpeedProfiler speed_profiler;
+    speed_profiler.init(total_dist, labels, pts);
+
     for (int j = 0; j <= NY; ++j) {
         for (int i = 0; i <= NX; ++i) {
             int i0 = std::max(0, i - 1), i1 = std::min(NX, i + 1);
@@ -784,20 +861,20 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Dynamic flight timing based on trajectory distance and city landmark density:
-    // Ensures viewers have ample time to comfortably see and read every city landmark along the route.
+    // Dynamic flight timing based on trajectory distance and milestone density:
+    // Ensures viewers have ample time (~8-12s) to comfortably see and read every city milestone along the route.
     double d_km = total_dist / 1000.0;
-    double t_dist = 35.0 + 12.0 * std::log(1.0 + std::max(0.0, d_km) / 8.0);
+    double t_dist = 40.0 + 15.0 * std::log(1.0 + std::max(0.0, d_km) / 8.0);
     size_t n_labels = labels.size();
     size_t n_overview = 0;
     for (const auto& l : labels) if (l.overview) n_overview++;
-    // Allocate ~7.5 seconds of cruising viewing window per milestone label so all words are easy to read
-    double t_cities = std::max(40.0, static_cast<double>(n_labels) * 7.5);
-    double cruise_sec = std::clamp(std::max(t_dist, t_cities), 35.0, 240.0);
+    // Allocate ~8.5 seconds of cruising viewing window per milestone label so all words are easy to read
+    double t_cities = std::max(45.0, static_cast<double>(n_labels) * 8.5);
+    double cruise_sec = std::clamp(std::max(t_dist, t_cities), 45.0, 240.0);
 
-    // If specified in track_data.json, respect explicit override:
+    // If specified in track_data.json, respect explicit override if greater or equal:
     double json_cruise = extract_json_num(jstr, "cruise_sec", 0.0);
-    if (json_cruise >= 15.0) cruise_sec = json_cruise;
+    if (json_cruise >= 15.0) cruise_sec = std::max(cruise_sec, json_cruise);
 
     // Strictly controlled within 2.0 seconds before track starts and after track finishes
     const double INTRO_SEC = 1.0;
@@ -824,8 +901,6 @@ int main(int argc, char* argv[]) {
     quads.reserve(GNX * GNY);
 
     std::vector<float> smooth_lbl_alpha(labels.size(), 0.0f);
-    std::vector<float> smooth_lbl_sx(labels.size(), -9999.0f);
-    std::vector<float> smooth_lbl_sy(labels.size(), -9999.0f);
 
     for (int f = 0; f < TOTAL_FRAMES; ++f) {
         double t_sec = static_cast<double>(f) / FPS;
@@ -856,10 +931,10 @@ int main(int argc, char* argv[]) {
             cam_yaw = ov_yaw * (1.0 - u) + sy * u;
             cam_pitch = ov_pitch * (1.0 - u) + follow_pitch * u;
         } else if (t_sec < T2) {
-            // Constant-speed, silky smooth cruising by cumulative distance (eliminates GPS point speed jitter)
+            // Adaptive cruising with smooth milestone deceleration
             double u = (t_sec - T1) / CRUISE_SEC;
             double prog = map_cruise_progress(u);
-            double target_dist = prog * total_dist;
+            double target_dist = speed_profiler.get_dist(prog);
 
             while (cur_idx < N - 2 && pts[cur_idx + 1].dist < target_dist) {
                 cur_idx++;
@@ -988,14 +1063,14 @@ int main(int argc, char* argv[]) {
                         } else {
                             float dp_scale = static_cast<float>(z_scale_factor);
                             // Stable forward reading window:
-                            // Visible from 2600px ahead, fades out smoothly as vehicle reaches it (< 180px),
-                            // preventing labels from rapidly whipping across or off the screen!
-                            if (dp <= 2600.0f * dp_scale && dp >= 80.0f * dp_scale) {
+                            // Visible from 2600px ahead (~9.5km), fades out gently as vehicle approaches (< 350px, ~1.3km)
+                            // so the sign never rushes downward or whips past the camera!
+                            if (dp <= 2600.0f * dp_scale && dp >= 120.0f * dp_scale) {
                                 float fade_dist = 1.0f;
                                 if (dp > 1800.0f * dp_scale) {
                                     fade_dist = std::clamp((2600.0f * dp_scale - dp) / (800.0f * dp_scale), 0.0f, 1.0f);
-                                } else if (dp < 200.0f * dp_scale) {
-                                    fade_dist = std::clamp((dp - 80.0f * dp_scale) / (120.0f * dp_scale), 0.0f, 1.0f);
+                                } else if (dp < 350.0f * dp_scale) {
+                                    fade_dist = std::clamp((dp - 120.0f * dp_scale) / (230.0f * dp_scale), 0.0f, 1.0f);
                                 }
 
                                 // Soft screen edge fade: if milestone approaches left/right screen edges, gently fade out
@@ -1007,20 +1082,12 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Smooth exponential fade (eliminates sudden popping in / popping out and flickering)
-                smooth_lbl_alpha[li] = smooth_lbl_alpha[li] * 0.90f + target_alpha * 0.10f;
+                smooth_lbl_alpha[li] = smooth_lbl_alpha[li] * 0.88f + target_alpha * 0.12f;
 
                 if (smooth_lbl_alpha[li] > 0.02f) {
-                    // Continuous sub-pixel coordinate tracking without abrupt snapping
-                    if (smooth_lbl_sx[li] < -9000.0f) {
-                        smooth_lbl_sx[li] = sx;
-                        smooth_lbl_sy[li] = sy;
-                    } else {
-                        smooth_lbl_sx[li] = smooth_lbl_sx[li] * 0.40f + sx * 0.60f;
-                        smooth_lbl_sy[li] = smooth_lbl_sy[li] * 0.40f + sy * 0.60f;
-                    }
-
-                    int dst_x = static_cast<int>(std::round(smooth_lbl_sx[li] - lbl.anchor_x));
-                    int dst_y = static_cast<int>(std::round(smooth_lbl_sy[li] - lbl.anchor_y));
+                    // Rock-solid 3D-anchored projection coordinate (zero lag, zero rubber-banding)
+                    int dst_x = static_cast<int>(std::round(sx - lbl.anchor_x));
+                    int dst_y = static_cast<int>(std::round(sy - lbl.anchor_y));
 
                     for (int ly = 0; ly < lbl.h; ++ly) {
                         int cy = dst_y + ly;
@@ -1036,9 +1103,6 @@ int main(int argc, char* argv[]) {
                             }
                         }
                     }
-                } else {
-                    smooth_lbl_sx[li] = -9999.0f;
-                    smooth_lbl_sy[li] = -9999.0f;
                 }
             }
         }
