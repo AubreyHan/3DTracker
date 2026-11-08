@@ -347,13 +347,24 @@ def generate_billboard_labels(td, out_dir):
     sub_pts = pts[::6] if len(pts) > 6 else pts
     selected = []
     seen_names = set()
+    # Suppress redundant broad district prefixes if local POI exists
+    broad_names = {"北京朝阳", "北京朝阳区", "朝阳区", "昌平区"}
     for name, clat, clon, tier in gazetteer:
-        if name in seen_names:
+        if name in seen_names or name in broad_names:
             continue
         min_d = min(haversine_km(clat, clon, p['lat'], p['lon']) for p in sub_pts)
         if min_d <= max_search_d:
             seen_names.add(name)
             selected.append({'name': name, 'lat': clat, 'lon': clon, 'tier': tier, 'dist': min_d})
+
+    # For local routes (< 300km), enforce minimum spatial spacing of 3.2km between any two labels
+    # to completely eliminate screen crowding, jumping, and flickering
+    if dist_km < 300.0:
+        spaced = []
+        for item in sorted(selected, key=lambda x: (x['tier'], x['dist'])):
+            if not any(haversine_km(item['lat'], item['lon'], s['lat'], s['lon']) < 3.2 for s in spaced):
+                spaced.append(item)
+        selected = spaced
 
     # Greedily mark overview labels so they do not collide during overview shot
     selected.sort(key=lambda x: (x['tier'], x['dist']))

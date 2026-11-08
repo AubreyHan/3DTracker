@@ -50,6 +50,37 @@ struct ImageRGBA {
         g = data[idx + 1];
         b = data[idx + 2];
     }
+
+    // High-precision bilinear interpolation for Retina-level crispness without texture crawling
+    inline void sample_bilinear(double u, double v, uint8_t& r, uint8_t& g, uint8_t& b) const {
+        if (w <= 0 || h <= 0) { r = 20; g = 26; b = 33; return; }
+        double su = std::clamp(u - 0.5, 0.0, static_cast<double>(w - 1.0001));
+        double sv = std::clamp(v - 0.5, 0.0, static_cast<double>(h - 1.0001));
+        int x0 = static_cast<int>(su);
+        int y0 = static_cast<int>(sv);
+        int x1 = std::min(w - 1, x0 + 1);
+        int y1 = std::min(h - 1, y0 + 1);
+        int fx = static_cast<int>((su - x0) * 256.0);
+        int fy = static_cast<int>((sv - y0) * 256.0);
+        int ifx = 256 - fx;
+        int ify = 256 - fy;
+
+        size_t row0 = static_cast<size_t>(y0) * w * 4;
+        size_t row1 = static_cast<size_t>(y1) * w * 4;
+        const uint8_t* p00 = &data[row0 + x0 * 4];
+        const uint8_t* p10 = &data[row0 + x1 * 4];
+        const uint8_t* p01 = &data[row1 + x0 * 4];
+        const uint8_t* p11 = &data[row1 + x1 * 4];
+
+        int w00 = ifx * ify;
+        int w10 = fx * ify;
+        int w01 = ifx * fy;
+        int w11 = fx * fy;
+
+        r = static_cast<uint8_t>((p00[0] * w00 + p10[0] * w10 + p01[0] * w01 + p11[0] * w11 + 32768) >> 16);
+        g = static_cast<uint8_t>((p00[1] * w00 + p10[1] * w10 + p01[1] * w01 + p11[1] * w11 + 32768) >> 16);
+        b = static_cast<uint8_t>((p00[2] * w00 + p10[2] * w10 + p01[2] * w01 + p11[2] * w11 + 32768) >> 16);
+    }
 };
 
 struct Canvas {
@@ -172,7 +203,7 @@ struct Canvas {
                     double u = w0 * u0 + w1 * u1 + w2 * u2;
                     double v = w0 * v0 + w1 * v1 + w2 * v2;
                     uint8_t tr, tg, tb;
-                    tex.sample_nearest(u, v, tr, tg, tb);
+                    tex.sample_bilinear(u, v, tr, tg, tb);
                     float fr = tr * shade * (1.0f - haze) + bg_r * haze;
                     float fg = tg * shade * (1.0f - haze) + bg_g * haze;
                     float fb = tb * shade * (1.0f - haze) + bg_b * haze;
@@ -715,6 +746,10 @@ int main(int argc, char* argv[]) {
     std::vector<Quad> quads;
     quads.reserve(NX * NY);
 
+    std::vector<float> smooth_lbl_alpha(labels.size(), 0.0f);
+    std::vector<float> smooth_lbl_sx(labels.size(), -9999.0f);
+    std::vector<float> smooth_lbl_sy(labels.size(), -9999.0f);
+
     for (int f = 0; f < TOTAL_FRAMES; ++f) {
         double t_sec = static_cast<double>(f) / FPS;
         double cam_x, cam_y, cam_z, cam_yaw, cam_pitch;
@@ -756,9 +791,8 @@ int main(int argc, char* argv[]) {
             double py = pts[cur_idx].py * (1.0 - frac) + pts[nxt_idx].py * frac;
             double pz = pts[cur_idx].pz_route * (1.0 - frac) + pts[nxt_idx].pz_route * frac;
             double hdg = smooth_hdg[cur_idx] * (1.0 - frac) + smooth_hdg[nxt_idx] * frac;
-            double orbit = 0.08 * std::sin(u * M_PI * 4.0);
-            cam_yaw = hdg + orbit;
-            cam_pitch = follow_pitch + 0.02 * std::cos(u * M_PI * 3.0);
+            cam_yaw = hdg;
+            cam_pitch = follow_pitch;
             cam_x = px - std::sin(cam_yaw) * follow_dist;
             cam_y = py + std::cos(cam_yaw) * follow_dist;
             cam_z = pz + follow_alt;
@@ -857,84 +891,66 @@ int main(int argc, char* argv[]) {
             canvas.draw_circle(hd_x, hd_y, 5.2f, 184, 255, 38, 1.0f);
         }
 
-        // Draw 3D screen-aligned billboard place name labels (upright, normal reading direction, fixed horizontal orientation)
+        // Draw 3D screen-aligned billboard place name labels with temporal stability (zero jitter, zero shaking)
         if (has_labels && !labels.empty()) {
             bool is_overview = (t_sec < T0 || t_sec > T3 - 0.5);
-            struct CandLabel {
-                size_t idx;
-                float sx, sy, dp, alpha;
-            };
-            std::vector<CandLabel> cands;
 
             for (size_t li = 0; li < labels.size(); ++li) {
                 const auto& lbl = labels[li];
-                if (is_overview && !lbl.overview) continue;
+                float target_alpha = 0.0f;
+                float sx = 0.0f, sy = 0.0f, dp = 0.0f;
 
-                float sx, sy, dp;
-                if (!cam.project(lbl.px, lbl.py, lbl.pz, sx, sy, dp)) continue;
-                if (dp < 15.0f) continue;
-                if (sx < -60.0f || sx > W + 60.0f || sy < 40.0f || sy > H + 25.0f) continue;
-
-                float alpha = 1.0f;
-                if (is_overview) {
-                    alpha = 0.95f;
-                } else {
-                    // Cruising shot: view distance fade (extended to 1750m so city names appear earlier and stay longer)
-                    if (dp > 1750.0f || dp < 25.0f) continue;
-                    if (dp > 1200.0f) {
-                        alpha = std::clamp((1750.0f - dp) / 550.0f, 0.0f, 1.0f);
-                    } else if (dp < 60.0f) {
-                        alpha = std::clamp((dp - 25.0f) / 35.0f, 0.0f, 1.0f);
-                    }
-                }
-                if (alpha > 0.05f) {
-                    cands.push_back({li, sx, sy, dp, alpha});
-                }
-            }
-
-            // Screen space decluttering / collision avoidance
-            std::sort(cands.begin(), cands.end(), [&](const CandLabel& a, const CandLabel& b) {
-                if (labels[a.idx].tier != labels[b.idx].tier)
-                    return labels[a.idx].tier < labels[b.idx].tier;
-                return a.dp < b.dp;
-            });
-
-            std::vector<CandLabel> visible_cands;
-            for (const auto& c : cands) {
-                bool collides = false;
-                for (const auto& v : visible_cands) {
-                    float dx = std::abs(c.sx - v.sx);
-                    float dy = std::abs(c.sy - v.sy);
-                    // Collision box adapted for 2x enlarged font badges (dx ~88px, dy ~36px)
-                    if (dx < 88.0f && dy < 36.0f) {
-                        collides = true;
-                        break;
-                    }
-                }
-                if (!collides) {
-                    visible_cands.push_back(c);
-                }
-            }
-
-            // Draw visible billboard labels horizontally on canvas (100% upright, normal reading direction)
-            for (const auto& vc : visible_cands) {
-                const auto& lbl = labels[vc.idx];
-                int dst_x = static_cast<int>(std::round(vc.sx - lbl.anchor_x));
-                int dst_y = static_cast<int>(std::round(vc.sy - lbl.anchor_y));
-
-                for (int ly = 0; ly < lbl.h; ++ly) {
-                    int cy = dst_y + ly;
-                    if (cy < 0 || cy >= H) continue;
-                    for (int lx = 0; lx < lbl.w; ++lx) {
-                        int cx = dst_x + lx;
-                        if (cx < 0 || cx >= W) continue;
-                        size_t src_idx = (static_cast<size_t>(lbl.atlas_y + ly) * labels_atlas.w + (lbl.atlas_x + lx)) * 4;
-                        uint8_t a = labels_atlas.data[src_idx + 3];
-                        if (a > 0) {
-                            float fa = (a / 255.0f) * vc.alpha;
-                            canvas.blend_px(cx, cy, labels_atlas.data[src_idx], labels_atlas.data[src_idx + 1], labels_atlas.data[src_idx + 2], fa);
+                if (cam.project(lbl.px, lbl.py, lbl.pz, sx, sy, dp) && dp >= 20.0f) {
+                    if (sx >= -60.0f && sx <= W + 60.0f && sy >= 35.0f && sy <= H + 25.0f) {
+                        if (is_overview) {
+                            if (lbl.overview) target_alpha = 0.95f;
+                        } else {
+                            if (dp <= 1650.0f && dp >= 25.0f) {
+                                float fade = 1.0f;
+                                if (dp > 1150.0f) {
+                                    fade = std::clamp((1650.0f - dp) / 500.0f, 0.0f, 1.0f);
+                                } else if (dp < 60.0f) {
+                                    fade = std::clamp((dp - 25.0f) / 35.0f, 0.0f, 1.0f);
+                                }
+                                target_alpha = fade;
+                            }
                         }
                     }
+                }
+
+                // Smooth exponential fade (eliminates sudden popping in / popping out and flickering)
+                smooth_lbl_alpha[li] = smooth_lbl_alpha[li] * 0.85f + target_alpha * 0.15f;
+
+                if (smooth_lbl_alpha[li] > 0.02f) {
+                    // Smooth screen projection coordinates to dampen any sub-pixel raster wobble
+                    if (smooth_lbl_sx[li] > -1000.0f && std::hypot(sx - smooth_lbl_sx[li], sy - smooth_lbl_sy[li]) < 40.0f) {
+                        smooth_lbl_sx[li] = smooth_lbl_sx[li] * 0.35f + sx * 0.65f;
+                        smooth_lbl_sy[li] = smooth_lbl_sy[li] * 0.35f + sy * 0.65f;
+                    } else {
+                        smooth_lbl_sx[li] = sx;
+                        smooth_lbl_sy[li] = sy;
+                    }
+
+                    int dst_x = static_cast<int>(std::round(smooth_lbl_sx[li] - lbl.anchor_x));
+                    int dst_y = static_cast<int>(std::round(smooth_lbl_sy[li] - lbl.anchor_y));
+
+                    for (int ly = 0; ly < lbl.h; ++ly) {
+                        int cy = dst_y + ly;
+                        if (cy < 0 || cy >= H) continue;
+                        for (int lx = 0; lx < lbl.w; ++lx) {
+                            int cx = dst_x + lx;
+                            if (cx < 0 || cx >= W) continue;
+                            size_t src_idx = (static_cast<size_t>(lbl.atlas_y + ly) * labels_atlas.w + (lbl.atlas_x + lx)) * 4;
+                            uint8_t a = labels_atlas.data[src_idx + 3];
+                            if (a > 0) {
+                                float fa = (a / 255.0f) * smooth_lbl_alpha[li];
+                                canvas.blend_px(cx, cy, labels_atlas.data[src_idx], labels_atlas.data[src_idx + 1], labels_atlas.data[src_idx + 2], fa);
+                            }
+                        }
+                    }
+                } else {
+                    smooth_lbl_sx[li] = -9999.0f;
+                    smooth_lbl_sy[li] = -9999.0f;
                 }
             }
         }
