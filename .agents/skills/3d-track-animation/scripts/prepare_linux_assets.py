@@ -348,14 +348,14 @@ def generate_billboard_labels(td, out_dir):
             seen_names.add(name)
             selected.append({'name': name, 'lat': clat, 'lon': clon, 'tier': tier, 'dist': min_d})
 
-    # For local routes (< 300km), enforce minimum spatial spacing of 3.2km between any two labels
-    # to completely eliminate screen crowding, jumping, and flickering
-    if dist_km < 300.0:
-        spaced = []
-        for item in sorted(selected, key=lambda x: (x['tier'], x['dist'])):
-            if not any(haversine_km(item['lat'], item['lon'], s['lat'], s['lon']) < 3.2 for s in spaced):
-                spaced.append(item)
-        selected = spaced
+    # Enforce minimum spatial spacing between any two labels according to route distance
+    # to completely eliminate screen crowding, jumping, and flickering (Rule 11)
+    min_label_spacing = 45.0 if dist_km > 1000.0 else (20.0 if dist_km > 300.0 else (8.0 if dist_km > 60.0 else 3.2))
+    spaced = []
+    for item in sorted(selected, key=lambda x: (x['tier'], 0 if x.get('overview') else 1)):
+        if not any(haversine_km(item['lat'], item['lon'], s['lat'], s['lon']) < min_label_spacing for s in spaced):
+            spaced.append(item)
+    selected = spaced
 
     # Greedily mark overview labels so they do not collide during overview shot
     selected.sort(key=lambda x: (x['tier'], x['dist']))
