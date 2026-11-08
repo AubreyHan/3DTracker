@@ -61,11 +61,23 @@ struct ImageRGBA {
         b = data[idx + 2];
     }
 
-    // High-precision bilinear interpolation for Retina-level crispness without texture crawling
+    // High-precision bilinear interpolation with seamless mirror wrap for 8-direction terrain skirt
     inline void sample_bilinear(double u, double v, uint8_t& r, uint8_t& g, uint8_t& b) const {
         if (w <= 0 || h <= 0) { r = 20; g = 26; b = 33; return; }
-        double su = std::clamp(u - 0.5, 0.0, static_cast<double>(w - 1.0001));
-        double sv = std::clamp(v - 0.5, 0.0, static_cast<double>(h - 1.0001));
+        double su = u - 0.5;
+        double sv = v - 0.5;
+        if (su < 0.0 || su >= w - 1.0) {
+            double period_x = 2.0 * (w - 1.0);
+            su = std::fmod(std::abs(su), period_x);
+            if (su >= w - 1.0) su = period_x - su;
+        }
+        if (sv < 0.0 || sv >= h - 1.0) {
+            double period_y = 2.0 * (h - 1.0);
+            sv = std::fmod(std::abs(sv), period_y);
+            if (sv >= h - 1.0) sv = period_y - sv;
+        }
+        su = std::clamp(su, 0.0, static_cast<double>(w - 1.0001));
+        sv = std::clamp(sv, 0.0, static_cast<double>(h - 1.0001));
         int x0 = static_cast<int>(su);
         int y0 = static_cast<int>(sv);
         int x1 = std::min(w - 1, x0 + 1);
