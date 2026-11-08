@@ -70,37 +70,41 @@ def prepare_with_pil(td, res_dir, out_dir):
     road_dir = td.get('road_tiles_dir', '')
     use_road = bool(td.get('use_road_overlay', False))
 
-    mosaic = Image.new('RGBA', (mw, mh), (20, 26, 33, 255))
-    for ty in range(y_min, y_max + 1):
-        for tx in range(x_min, x_max + 1):
-            p = os.path.join(sat_dir, f"{z}_{tx}_{ty}.jpg")
-            if os.path.exists(p):
-                try:
-                    im = Image.open(p).convert('RGBA')
-                    if im.size != (256, 256):
-                        im = im.resize((256, 256), Image.Resampling.BILINEAR)
-                    mosaic.paste(im, ((tx - x_min) * 256, (ty - y_min) * 256))
-                except Exception:
-                    pass
-
-    # Composite road network overlay (highways, expressways, national routes)
-    # Using clean road vectors (ArcGIS World_Transportation) preserves crisp roads on the 3D ground mesh
-    # without baking any upside-down or rotating Chinese characters onto the satellite terrain.
-    # All city place names remain screen-aligned upright billboard badges.
-    if use_road and road_dir and os.path.exists(road_dir):
+    mosaic_rgba_path = os.path.join(out_dir, "mosaic_color.rgba")
+    if os.path.exists(mosaic_rgba_path) and os.path.getsize(mosaic_rgba_path) >= (mw * mh * 4):
+        print(f"Reusing existing {mosaic_rgba_path} ({mw}x{mh})")
+    else:
+        mosaic = Image.new('RGBA', (mw, mh), (20, 26, 33, 255))
         for ty in range(y_min, y_max + 1):
             for tx in range(x_min, x_max + 1):
-                rp = os.path.join(road_dir, f"{z}_{tx}_{ty}.png")
-                if os.path.exists(rp):
+                p = os.path.join(sat_dir, f"{z}_{tx}_{ty}.jpg")
+                if os.path.exists(p):
                     try:
-                        rim = Image.open(rp).convert('RGBA')
-                        if rim.size != (256, 256):
-                            rim = rim.resize((256, 256), Image.Resampling.BILINEAR)
-                        mosaic.paste(rim, ((tx - x_min) * 256, (ty - y_min) * 256), mask=rim)
+                        im = Image.open(p).convert('RGBA')
+                        if im.size != (256, 256):
+                            im = im.resize((256, 256), Image.Resampling.BILINEAR)
+                        mosaic.paste(im, ((tx - x_min) * 256, (ty - y_min) * 256))
                     except Exception:
                         pass
 
-    write_rgba_file(os.path.join(out_dir, "mosaic_color.rgba"), mw, mh, mosaic.tobytes())
+        # Composite road network overlay (highways, expressways, national routes)
+        # Using clean road vectors (ArcGIS World_Transportation) preserves crisp roads on the 3D ground mesh
+        # without baking any upside-down or rotating Chinese characters onto the satellite terrain.
+        # All city place names remain screen-aligned upright billboard badges.
+        if use_road and road_dir and os.path.exists(road_dir):
+            for ty in range(y_min, y_max + 1):
+                for tx in range(x_min, x_max + 1):
+                    rp = os.path.join(road_dir, f"{z}_{tx}_{ty}.png")
+                    if os.path.exists(rp):
+                        try:
+                            rim = Image.open(rp).convert('RGBA')
+                            if rim.size != (256, 256):
+                                rim = rim.resize((256, 256), Image.Resampling.BILINEAR)
+                            mosaic.paste(rim, ((tx - x_min) * 256, (ty - y_min) * 256), mask=rim)
+                        except Exception:
+                            pass
+
+        write_rgba_file(mosaic_rgba_path, mw, mh, mosaic.tobytes())
 
     # Load activity icon
     icon_mode = int(td.get('icon_mode', 0))
@@ -307,7 +311,6 @@ def generate_billboard_labels(td, out_dir):
         ("花果山村", 40.3129, 116.3346, 2),
         ("慈悲峪村", 40.3382, 116.3457, 2),
         ("北庄村", 40.3664, 116.3397, 2),
-        ("黑山烤房美食", 40.3677, 116.3148, 1),
         ("黑山寨", 40.3534, 116.2973, 2),
         ("东水峪村", 40.3264, 116.2698, 2),
         ("明十三陵", 40.2837, 116.2357, 1),

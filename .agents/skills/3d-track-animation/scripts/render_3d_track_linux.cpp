@@ -397,6 +397,77 @@ static double map_cruise_progress(double u) {
     return (u - 0.5 * a) / (1.0 - a);
 }
 
+class SpeedProfiler {
+public:
+    static constexpr int LUT_SIZE = 4096;
+    double total_dist = 0.0;
+    std::vector<double> milestone_dists;
+    std::vector<double> tau_table;
+    double sigma = 1800.0;
+
+    void init(double t_dist, double cruise_sec, const std::vector<double>& milestones) {
+        total_dist = t_dist;
+        milestone_dists = milestones;
+        tau_table.resize(LUT_SIZE + 1, 0.0);
+
+        if (total_dist <= 0.0 || cruise_sec <= 0.0) {
+            for (int i = 0; i <= LUT_SIZE; ++i) tau_table[i] = static_cast<double>(i) / LUT_SIZE;
+            return;
+        }
+
+        double v_nom = total_dist / cruise_sec;
+        // Adaptive sigma based on route scale (Rule 12):
+        // For short tracks, sigma ~ 1.8km; for grand routes (e.g. 8000km), scales smoothly up to 45km.
+        sigma = std::clamp(v_nom * 1.0, 1800.0, 45000.0);
+
+        std::vector<double> inv_v(LUT_SIZE + 1, 1.0);
+        double two_sig2 = 2.0 * sigma * sigma;
+
+        for (int i = 0; i <= LUT_SIZE; ++i) {
+            double s = total_dist * static_cast<double>(i) / LUT_SIZE;
+            double v = 1.0;
+            for (double md : milestone_dists) {
+                double diff = s - md;
+                if (std::abs(diff) < 4.0 * sigma) {
+                    double w = std::exp(-(diff * diff) / two_sig2);
+                    v -= 0.76 * w; // 76% smooth deceleration dip (Rule 12)
+                }
+            }
+            v = std::max(0.23, v); // Clamped to min 23% speed (Rule 12)
+            inv_v[i] = 1.0 / v;
+        }
+
+        std::vector<double> int_t(LUT_SIZE + 1, 0.0);
+        double step = total_dist / LUT_SIZE;
+        for (int i = 1; i <= LUT_SIZE; ++i) {
+            int_t[i] = int_t[i - 1] + 0.5 * (inv_v[i - 1] + inv_v[i]) * step;
+        }
+        double total_t = int_t[LUT_SIZE];
+        for (int i = 0; i <= LUT_SIZE; ++i) {
+            tau_table[i] = (total_t > 0.0) ? (int_t[i] / total_t) : (static_cast<double>(i) / LUT_SIZE);
+        }
+        tau_table[0] = 0.0;
+        tau_table[LUT_SIZE] = 1.0;
+    }
+
+    double get_dist(double tau) const {
+        if (tau <= 0.0) return 0.0;
+        if (tau >= 1.0) return total_dist;
+
+        auto it = std::lower_bound(tau_table.begin(), tau_table.end(), tau);
+        int idx = static_cast<int>(std::distance(tau_table.begin(), it));
+        if (idx <= 0) return 0.0;
+        if (idx >= LUT_SIZE) return total_dist;
+
+        int i0 = idx - 1;
+        int i1 = idx;
+        double t0 = tau_table[i0], t1 = tau_table[i1];
+        double frac = (t1 > t0) ? (tau - t0) / (t1 - t0) : 0.0;
+        double s_frac = (static_cast<double>(i0) + frac) / LUT_SIZE;
+        return std::clamp(s_frac * total_dist, 0.0, total_dist);
+    }
+};
+
 struct Camera3D {
     double cx, cy, cz, focal, cx_scr, cy_scr;
     double rx, ry, rz, ux, uy, uz, fx, fy, fz;
@@ -762,9 +833,9 @@ int main(int argc, char* argv[]) {
     // Centers the route on screen and ensures 100% full-screen satellite terrain coverage (0% void)
     double ov_pitch = (is_portrait ? 76.0 : 74.0) * M_PI / 180.0;
     double ov_yaw = 0.0; // Geographic North orientation
-    double ov_alt = is_portrait
-        ? std::clamp(span_y * 0.72, 8000.0, 24000.0)
-        : std::clamp(span_y * 0.58, 6000.0, 15000.0);
+    double req_alt_x = span_x * (is_portrait ? 1.62 : 1.08);
+    double req_alt_y = span_y * (is_portrait ? 1.35 : 1.25);
+    double ov_alt = std::clamp(std::max(req_alt_x, req_alt_y), 4500.0, 32000.0);
     double ov_cx = cx_mid;
     double ov_cy = cy_mid + ov_alt / std::tan(ov_pitch);
 
@@ -791,9 +862,8 @@ int main(int argc, char* argv[]) {
     size_t n_labels = labels.size();
     size_t n_overview = 0;
     for (const auto& l : labels) if (l.overview) n_overview++;
-    // Allocate ~7.5 seconds of cruising viewing window per milestone label so all words are easy to read
-    double t_cities = std::max(40.0, static_cast<double>(n_labels) * 7.5);
-    double cruise_sec = std::clamp(std::max(t_dist, t_cities), 35.0, 240.0);
+    double t_cities = std::max(40.0, static_cast<double>(n_labels) * 4.2);
+    double cruise_sec = std::clamp(std::max(t_dist, t_cities), 40.0, 160.0);
 
     // If specified in track_data.json, respect explicit override:
     double json_cruise = extract_json_num(jstr, "cruise_sec", 0.0);
@@ -805,6 +875,33 @@ int main(int argc, char* argv[]) {
     const double CRUISE_SEC = cruise_sec;
     const double OUTRO_TRANS_SEC = 1.0;
     const double OUTRO_HOLD_SEC = 1.0;
+
+    // Populate milestone track distances for SpeedProfiler (Rule 12)
+    std::vector<double> milestone_dists;
+    if (has_labels && !labels.empty()) {
+        for (const auto& lbl : labels) {
+            double min_d2 = 1e18;
+            int best_k = -1;
+            for (int k = 0; k < N; ++k) {
+                double dx = pts[k].px - lbl.px;
+                double dy = pts[k].py - lbl.py;
+                double d2 = dx * dx + dy * dy;
+                if (d2 < min_d2) {
+                    min_d2 = d2;
+                    best_k = k;
+                }
+            }
+            if (best_k >= 0 && std::sqrt(min_d2) <= 180.0 * z_scale_factor) {
+                milestone_dists.push_back(pts[best_k].dist);
+            }
+        }
+        std::sort(milestone_dists.begin(), milestone_dists.end());
+    }
+
+    SpeedProfiler speed_profiler;
+    speed_profiler.init(total_dist, CRUISE_SEC, milestone_dists);
+    std::cout << "SpeedProfiler: " << milestone_dists.size() << " milestones mapped. Deceleration sigma="
+              << speed_profiler.sigma / 1000.0 << " km (76% slowdown near landmarks)\n";
 
     const double T0 = INTRO_SEC;
     const double T1 = T0 + TRANS_SEC;
@@ -854,10 +951,10 @@ int main(int argc, char* argv[]) {
             cam_yaw = ov_yaw * (1.0 - u) + sy * u;
             cam_pitch = ov_pitch * (1.0 - u) + follow_pitch * u;
         } else if (t_sec < T2) {
-            // Constant-speed, silky smooth cruising by cumulative distance (eliminates GPS point speed jitter)
+            // Constant-speed, silky smooth cruising with milestone adaptive deceleration (Rule 12)
             double u = (t_sec - T1) / CRUISE_SEC;
-            double prog = map_cruise_progress(u);
-            double target_dist = prog * total_dist;
+            double tau = map_cruise_progress(u);
+            double target_dist = speed_profiler.get_dist(tau);
 
             while (cur_idx < N - 2 && pts[cur_idx + 1].dist < target_dist) {
                 cur_idx++;
