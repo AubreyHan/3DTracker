@@ -51,9 +51,10 @@ Examples:
 - **真实路网清晰呈现（Road Network Overlay）**：地图底图必须包含清晰可见的高速公路、国道、主干道等公路网络（Highways & Expressways），让观众清晰看清轨迹行经的真实道路脉络（如 G7 京新高速、G30 连霍高速等）。
 - **底图对齐与无烘焙歪斜字**：路网图层采用 ArcGIS `World_Transportation` 矢量路网（与 ArcGIS 卫星图同为 WGS84 Web Mercator 严格空间对齐），底图严禁烘焙栅格化的地名汉字（杜绝文字随相机视角倒置或倾斜）；所有沿途城市地名与打卡点均采用独立的屏幕空间正向看板（Billboard Badges）竖立展示。
 
-### 视网膜级地貌贴图与双线性滤波规范 (Retina Sub-Texel Bilinear Filtering)
-- **高精度双线性插值（Bilinear Interpolation）**：3D 光栅化引擎严禁使用粗糙的最近邻点采样（Nearest-Neighbor），必须全面采用子纹素高精度双线性插值算法（Sub-texel Bilinear Filtering），消除低空跟飞时的马赛克方块、走样台阶与地表蠕动杂波，呈现细腻平滑的视网膜级遥感地貌与真实公路路面。
-- **高分辨率瓦片金字塔（Zoom 14+ 优先）**：中短途自驾与运动轨迹自动分配高密度金字塔网格（Zoom 14+，地面分辨率 ~9.5m/px），清晰呈现道路分流、立体交叉与地貌细节。
+### 视网膜级地貌贴图与透视校正插值规范 (Retina Perspective-Correct & Zoom 15+ Detail)
+- **透视校正纹理插值（Perspective-Correct Texture Mapping）**：3D 光栅化引擎采用严格的三维深度透视校正插值（`invz = w0/z0 + w1/z1 + w2/z2`, `u = (w0*u0/z0 + ...) / invz`），彻底根除倾斜俯视视角下二维仿射拉伸造成的道路扭曲与模糊。
+- **高精度定点双线性插值（Sub-Texel Bilinear Filtering）**：结合定点子纹素双线性插值，杜绝低空巡航时的马赛克方块与地表爬行蠕动杂波。
+- **超高分辨率金字塔瓦片（Zoom 15 优先，~4.77m/px）**：自驾与运动轨迹优先采用 Zoom 15 级遥感金字塔（地面分辨率精细至 4.77 米/像素），呈现清晰的建筑屋顶、农田分界、道路分流与立体交叉。
 
 ### 地名标注稳定不晃动规范 (Stable Rock-Solid Billboard Badges)
 - **镜头平稳如滑轨云台（严禁人工正弦摇摆）**：巡航相机严禁在偏航角（yaw）与俯仰角（pitch）上叠加周期性正弦摆动波（`orbit` / `wobble`），轨迹航向角经过高斯平滑滤波，视角稳定顺滑推进，保证地标绝对不随晃动而摆动。

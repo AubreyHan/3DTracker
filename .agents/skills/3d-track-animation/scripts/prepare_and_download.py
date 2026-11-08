@@ -185,8 +185,8 @@ def choose_optimal_zoom(lats, lons, use_gcj02, forced_z=0):
             y_min, y_max = int(math.floor(ty0)), int(math.floor(ty1))
             cols = x_max - x_min + 1
             rows = y_max - y_min + 1
-            # Allow high-definition terrain (up to 1600 tiles) for much finer satellite detail
-            if max(cols, rows) <= 64 and cols * rows <= 1600:
+            # Allow ultra-high-definition terrain (up to 6500 tiles) for true Retina Zoom 15 satellite detail
+            if max(cols, rows) <= 128 and cols * rows <= 6500:
                 best_z = z
                 break
 
