@@ -33,12 +33,22 @@ struct ImageRGBA {
         uint32_t uw = 0, uh = 0;
         f.read(reinterpret_cast<char*>(&uw), 4);
         f.read(reinterpret_cast<char*>(&uh), 4);
-        if (!f || uw == 0 || uh == 0 || uw > 32768 || uh > 32768) return false;
+        if (!f || uw == 0 || uh == 0 || uw > 131072 || uh > 131072) return false;
         w = static_cast<int>(uw);
         h = static_cast<int>(uh);
-        data.resize(static_cast<size_t>(w) * h * 4);
-        f.read(reinterpret_cast<char*>(data.data()), data.size());
-        return f.good() || f.eof();
+        size_t total_bytes = static_cast<size_t>(w) * h * 4;
+        data.resize(total_bytes);
+        size_t bytes_read = 0;
+        char* ptr = reinterpret_cast<char*>(data.data());
+        const size_t CHUNK = 64 * 1024 * 1024; // 64MB chunks
+        while (bytes_read < total_bytes && f.good()) {
+            size_t to_read = std::min(CHUNK, total_bytes - bytes_read);
+            f.read(ptr + bytes_read, to_read);
+            std::streamsize n = f.gcount();
+            if (n <= 0) break;
+            bytes_read += static_cast<size_t>(n);
+        }
+        return (bytes_read == total_bytes);
     }
 
     inline void sample_nearest(double u, double v, uint8_t& r, uint8_t& g, uint8_t& b) const {
@@ -67,10 +77,10 @@ struct ImageRGBA {
 
         size_t row0 = static_cast<size_t>(y0) * w * 4;
         size_t row1 = static_cast<size_t>(y1) * w * 4;
-        const uint8_t* p00 = &data[row0 + x0 * 4];
-        const uint8_t* p10 = &data[row0 + x1 * 4];
-        const uint8_t* p01 = &data[row1 + x0 * 4];
-        const uint8_t* p11 = &data[row1 + x1 * 4];
+        const uint8_t* p00 = &data[row0 + static_cast<size_t>(x0) * 4];
+        const uint8_t* p10 = &data[row0 + static_cast<size_t>(x1) * 4];
+        const uint8_t* p01 = &data[row1 + static_cast<size_t>(x0) * 4];
+        const uint8_t* p11 = &data[row1 + static_cast<size_t>(x1) * 4];
 
         int w00 = ifx * ify;
         int w10 = fx * ify;
