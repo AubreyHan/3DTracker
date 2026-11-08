@@ -689,6 +689,47 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Precompute 8-direction terrain skirt grid to guarantee 100% full-screen satellite map coverage
+    const int EXT_X = 6, EXT_Y = 6;
+    const int GNX = NX + 2 * EXT_X, GNY = NY + 2 * EXT_Y;
+    std::vector<double> grid_wx((GNX + 1) * (GNY + 1)), grid_wy((GNX + 1) * (GNY + 1));
+    std::vector<float> grid_h((GNX + 1) * (GNY + 1)), grid_sh((GNX + 1) * (GNY + 1));
+
+    for (int gj = 0; gj <= GNY; ++gj) {
+        double wy;
+        if (gj < EXT_Y) {
+            wy = -static_cast<double>(MH) * 1.5 * (EXT_Y - gj) / EXT_Y;
+        } else if (gj <= EXT_Y + NY) {
+            wy = (gj - EXT_Y) * cell_h;
+        } else {
+            wy = static_cast<double>(MH) + static_cast<double>(MH) * 1.5 * (gj - (EXT_Y + NY)) / EXT_Y;
+        }
+
+        for (int gi = 0; gi <= GNX; ++gi) {
+            double wx;
+            if (gi < EXT_X) {
+                wx = -static_cast<double>(MW) * 1.5 * (EXT_X - gi) / EXT_X;
+            } else if (gi <= EXT_X + NX) {
+                wx = (gi - EXT_X) * cell_w;
+            } else {
+                wx = static_cast<double>(MW) + static_cast<double>(MW) * 1.5 * (gi - (EXT_X + NX)) / EXT_X;
+            }
+
+            int g_idx = gj * (GNX + 1) + gi;
+            grid_wx[g_idx] = wx;
+            grid_wy[g_idx] = wy;
+
+            if (gi >= EXT_X && gi <= EXT_X + NX && gj >= EXT_Y && gj <= EXT_Y + NY) {
+                int core_idx = (gj - EXT_Y) * (NX + 1) + (gi - EXT_X);
+                grid_h[g_idx] = hgrid[core_idx];
+                grid_sh[g_idx] = sgrid[core_idx];
+            } else {
+                grid_h[g_idx] = 0.0f;
+                grid_sh[g_idx] = 1.0f;
+            }
+        }
+    }
+
     // Precompute headings
     int N = static_cast<int>(pts.size());
     std::vector<double> headings(N, 0.0), smooth_hdg(N, 0.0);
@@ -717,13 +758,13 @@ int main(int argc, char* argv[]) {
     double span_x = rx1 - rx0, span_y = ry1 - ry0;
     bool is_portrait = (H > W);
 
-    // Overview Camera: 64°-66° tilt looking downward at satellite earth with clear 3D relief
+    // Overview Camera: 74°-76° steep tilt looking firmly downward at satellite earth
     // Centers the route on screen and ensures 100% full-screen satellite terrain coverage (0% void)
-    double ov_pitch = (is_portrait ? 66.0 : 64.0) * M_PI / 180.0;
+    double ov_pitch = (is_portrait ? 76.0 : 74.0) * M_PI / 180.0;
     double ov_yaw = 0.0; // Geographic North orientation
     double ov_alt = is_portrait
-        ? std::max(std::max(span_x / 0.58, span_y / 1.05) * 1.08, 700.0)
-        : std::max(std::max(span_x / 1.55, span_y / 0.85) * 1.12, 600.0);
+        ? std::clamp(span_y * 0.72, 8000.0, 24000.0)
+        : std::clamp(span_y * 0.58, 6000.0, 15000.0);
     double ov_cx = cx_mid;
     double ov_cy = cy_mid + ov_alt / std::tan(ov_pitch);
 
@@ -733,10 +774,10 @@ int main(int argc, char* argv[]) {
     double follow_alt   = (is_portrait ? 92.0 : 75.0) * z_scale_factor;
     double follow_dist  = (is_portrait ? 75.0 : 65.0) * z_scale_factor;
 
-    // Open ffmpeg pipe
+    // Open ffmpeg pipe (60 fps for silky smooth motion)
     std::ostringstream cmd;
     cmd << "ffmpeg -y -f rawvideo -pix_fmt rgb24 -s " << W << "x" << H
-        << " -r 30 -i - -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \"" << out_mp4 << "\"";
+        << " -r 60 -i - -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \"" << out_mp4 << "\"";
     FILE* pipe = popen(cmd.str().c_str(), "w");
     if (!pipe) {
         std::cerr << "Error: Failed to open ffmpeg pipe.\n";
@@ -770,7 +811,7 @@ int main(int argc, char* argv[]) {
     const double T2 = T1 + CRUISE_SEC;
     const double T3 = T2 + OUTRO_TRANS_SEC;
     const double TOTAL_SEC = T3 + OUTRO_HOLD_SEC;
-    const int FPS = 30;
+    const int FPS = 60;
     const int TOTAL_FRAMES = static_cast<int>(TOTAL_SEC * FPS);
     Canvas canvas(W, H);
 
@@ -780,7 +821,7 @@ int main(int argc, char* argv[]) {
 
     struct Quad { int i, j; float depth; };
     std::vector<Quad> quads;
-    quads.reserve(NX * NY);
+    quads.reserve(GNX * GNY);
 
     std::vector<float> smooth_lbl_alpha(labels.size(), 0.0f);
     std::vector<float> smooth_lbl_sx(labels.size(), -9999.0f);
@@ -815,19 +856,29 @@ int main(int argc, char* argv[]) {
             cam_yaw = ov_yaw * (1.0 - u) + sy * u;
             cam_pitch = ov_pitch * (1.0 - u) + follow_pitch * u;
         } else if (t_sec < T2) {
-            // Slower, graceful cruising dynamically scaled to trajectory distance and city count
+            // Constant-speed, silky smooth cruising by cumulative distance (eliminates GPS point speed jitter)
             double u = (t_sec - T1) / CRUISE_SEC;
             double prog = map_cruise_progress(u);
-            double idx_f = prog * (N - 1);
-            cur_idx = std::clamp(static_cast<int>(idx_f), 0, N - 1);
+            double target_dist = prog * total_dist;
+
+            while (cur_idx < N - 2 && pts[cur_idx + 1].dist < target_dist) {
+                cur_idx++;
+            }
             int nxt_idx = std::min(N - 1, cur_idx + 1);
-            double frac = idx_f - cur_idx;
+            double seg_len = pts[nxt_idx].dist - pts[cur_idx].dist;
+            double frac = (seg_len > 1e-4) ? std::clamp((target_dist - pts[cur_idx].dist) / seg_len, 0.0, 1.0) : 0.0;
             hud_alpha = 1.0;
             double px = pts[cur_idx].px * (1.0 - frac) + pts[nxt_idx].px * frac;
             double py = pts[cur_idx].py * (1.0 - frac) + pts[nxt_idx].py * frac;
             double pz = pts[cur_idx].pz_route * (1.0 - frac) + pts[nxt_idx].pz_route * frac;
             double hdg = smooth_hdg[cur_idx] * (1.0 - frac) + smooth_hdg[nxt_idx] * frac;
-            cam_yaw = hdg;
+
+            // Steadicam continuous angle smoothing (no angular snapping)
+            double d_hdg = hdg - cam_yaw;
+            while (d_hdg > M_PI) d_hdg -= 2.0 * M_PI;
+            while (d_hdg < -M_PI) d_hdg += 2.0 * M_PI;
+            cam_yaw += d_hdg * 0.10;
+
             cam_pitch = follow_pitch;
             cam_x = px - std::sin(cam_yaw) * follow_dist;
             cam_y = py + std::cos(cam_yaw) * follow_dist;
@@ -856,25 +907,20 @@ int main(int argc, char* argv[]) {
         cam.setup(cam_x, cam_y, cam_z, cam_yaw, cam_pitch, is_portrait ? 58.0 : 50.0, W, H);
         canvas.fill_solid(mean_r, mean_g, mean_b);
 
-        // Project terrain vertices
-        std::vector<float> vx((NX + 1) * (NY + 1)), vy((NX + 1) * (NY + 1)), vz((NX + 1) * (NY + 1));
-        std::vector<uint8_t> v_ok((NX + 1) * (NY + 1), 0);
-        for (int j = 0; j <= NY; ++j) {
-            double wy = j * cell_h;
-            for (int i = 0; i <= NX; ++i) {
-                double wx = i * cell_w;
-                int idx = j * (NX + 1) + i;
-                float sx, sy, dp;
-                if (cam.project(wx, wy, hgrid[idx], sx, sy, dp)) {
-                    vx[idx] = sx; vy[idx] = sy; vz[idx] = dp; v_ok[idx] = 1;
-                }
+        // Project extended terrain vertices (core + 8-direction terrain skirt)
+        std::vector<float> vx((GNX + 1) * (GNY + 1)), vy((GNX + 1) * (GNY + 1)), vz((GNX + 1) * (GNY + 1));
+        std::vector<uint8_t> v_ok((GNX + 1) * (GNY + 1), 0);
+        for (int idx = 0; idx < (GNX + 1) * (GNY + 1); ++idx) {
+            float sx, sy, dp;
+            if (cam.project(grid_wx[idx], grid_wy[idx], grid_h[idx], sx, sy, dp)) {
+                vx[idx] = sx; vy[idx] = sy; vz[idx] = dp; v_ok[idx] = 1;
             }
         }
 
         quads.clear();
-        for (int j = 0; j < NY; ++j) {
-            for (int i = 0; i < NX; ++i) {
-                int i00 = j * (NX + 1) + i, i10 = i00 + 1, i01 = (j + 1) * (NX + 1) + i, i11 = i01 + 1;
+        for (int gj = 0; gj < GNY; ++gj) {
+            for (int gi = 0; gi < GNX; ++gi) {
+                int i00 = gj * (GNX + 1) + gi, i10 = i00 + 1, i01 = (gj + 1) * (GNX + 1) + gi, i11 = i01 + 1;
                 if (!(v_ok[i00] && v_ok[i10] && v_ok[i01] && v_ok[i11])) continue;
                 float minx = std::min({vx[i00], vx[i10], vx[i01], vx[i11]});
                 float maxx = std::max({vx[i00], vx[i10], vx[i01], vx[i11]});
@@ -882,17 +928,17 @@ int main(int argc, char* argv[]) {
                 float maxy = std::max({vy[i00], vy[i10], vy[i01], vy[i11]});
                 if (maxx < 0 || minx > W || maxy < 0 || miny > H) continue;
                 float d = 0.25f * (vz[i00] + vz[i10] + vz[i01] + vz[i11]);
-                quads.push_back({i, j, d});
+                quads.push_back({gi, gj, d});
             }
         }
         std::sort(quads.begin(), quads.end(), [](const Quad& a, const Quad& b) { return a.depth > b.depth; });
 
         for (const auto& q : quads) {
-            int i = q.i, j = q.j;
-            int i00 = j * (NX + 1) + i, i10 = i00 + 1, i01 = (j + 1) * (NX + 1) + i, i11 = i01 + 1;
-            float u0 = static_cast<float>(i * cell_w), u1 = static_cast<float>((i + 1) * cell_w);
-            float v0 = static_cast<float>(j * cell_h), v1 = static_cast<float>((j + 1) * cell_h);
-            float sh = 0.25f * (sgrid[i00] + sgrid[i10] + sgrid[i01] + sgrid[i11]);
+            int gi = q.i, gj = q.j;
+            int i00 = gj * (GNX + 1) + gi, i10 = i00 + 1, i01 = (gj + 1) * (GNX + 1) + gi, i11 = i01 + 1;
+            float u0 = static_cast<float>(grid_wx[i00]), u1 = static_cast<float>(grid_wx[i10]);
+            float v0 = static_cast<float>(grid_wy[i00]), v1 = static_cast<float>(grid_wy[i01]);
+            float sh = 0.25f * (grid_sh[i00] + grid_sh[i10] + grid_sh[i01] + grid_sh[i11]);
             float hz = static_cast<float>(std::clamp((q.depth - 900.0) / 3800.0, 0.0, 0.35));
             canvas.draw_textured_triangle(vx[i00], vy[i00], vz[i00], u0, v0, vx[i10], vy[i10], vz[i10], u1, v0, vx[i11], vy[i11], vz[i11], u1, v1, mosaic_color, sh, hz);
             canvas.draw_textured_triangle(vx[i00], vy[i00], vz[i00], u0, v0, vx[i11], vy[i11], vz[i11], u1, v1, vx[i01], vy[i01], vz[i01], u0, v1, mosaic_color, sh, hz);
@@ -922,9 +968,8 @@ int main(int argc, char* argv[]) {
         }
         float hd_x, hd_y, hd_d;
         if (cam.project(pts[cur_idx].px, pts[cur_idx].py, pts[cur_idx].pz_route, hd_x, hd_y, hd_d)) {
-            canvas.draw_circle(hd_x, hd_y - 22.0f, 20.0f, 255, 255, 255, 0.92f);
-            canvas.draw_circle(hd_x, hd_y, 7.5f, 255, 255, 255, 0.98f);
-            canvas.draw_circle(hd_x, hd_y, 5.2f, 184, 255, 38, 1.0f);
+            canvas.draw_circle(hd_x, hd_y, 8.5f, 255, 255, 255, 0.98f);
+            canvas.draw_circle(hd_x, hd_y, 6.0f, 184, 255, 38, 1.0f);
         }
 
         // Draw 3D screen-aligned billboard place name labels with temporal stability (zero jitter, zero shaking)
@@ -942,30 +987,36 @@ int main(int argc, char* argv[]) {
                             if (lbl.overview) target_alpha = 0.95f;
                         } else {
                             float dp_scale = static_cast<float>(z_scale_factor);
-                            if (dp <= 3000.0f * dp_scale && dp >= 20.0f * dp_scale) {
-                                float fade = 1.0f;
-                                if (dp > 2000.0f * dp_scale) {
-                                    fade = std::clamp((3000.0f * dp_scale - dp) / (1000.0f * dp_scale), 0.0f, 1.0f);
-                                } else if (dp < 45.0f * dp_scale) {
-                                    fade = std::clamp((dp - 20.0f * dp_scale) / (25.0f * dp_scale), 0.0f, 1.0f);
+                            // Stable forward reading window:
+                            // Visible from 2600px ahead, fades out smoothly as vehicle reaches it (< 180px),
+                            // preventing labels from rapidly whipping across or off the screen!
+                            if (dp <= 2600.0f * dp_scale && dp >= 80.0f * dp_scale) {
+                                float fade_dist = 1.0f;
+                                if (dp > 1800.0f * dp_scale) {
+                                    fade_dist = std::clamp((2600.0f * dp_scale - dp) / (800.0f * dp_scale), 0.0f, 1.0f);
+                                } else if (dp < 200.0f * dp_scale) {
+                                    fade_dist = std::clamp((dp - 80.0f * dp_scale) / (120.0f * dp_scale), 0.0f, 1.0f);
                                 }
-                                target_alpha = fade;
+
+                                // Soft screen edge fade: if milestone approaches left/right screen edges, gently fade out
+                                float fade_edge = std::clamp(std::min(sx - 45.0f, W - 45.0f - sx) / 85.0f, 0.0f, 1.0f);
+                                target_alpha = fade_dist * fade_edge;
                             }
                         }
                     }
                 }
 
                 // Smooth exponential fade (eliminates sudden popping in / popping out and flickering)
-                smooth_lbl_alpha[li] = smooth_lbl_alpha[li] * 0.85f + target_alpha * 0.15f;
+                smooth_lbl_alpha[li] = smooth_lbl_alpha[li] * 0.90f + target_alpha * 0.10f;
 
                 if (smooth_lbl_alpha[li] > 0.02f) {
-                    // Smooth screen projection coordinates to dampen any sub-pixel raster wobble
-                    if (smooth_lbl_sx[li] > -1000.0f && std::hypot(sx - smooth_lbl_sx[li], sy - smooth_lbl_sy[li]) < 40.0f) {
-                        smooth_lbl_sx[li] = smooth_lbl_sx[li] * 0.35f + sx * 0.65f;
-                        smooth_lbl_sy[li] = smooth_lbl_sy[li] * 0.35f + sy * 0.65f;
-                    } else {
+                    // Continuous sub-pixel coordinate tracking without abrupt snapping
+                    if (smooth_lbl_sx[li] < -9000.0f) {
                         smooth_lbl_sx[li] = sx;
                         smooth_lbl_sy[li] = sy;
+                    } else {
+                        smooth_lbl_sx[li] = smooth_lbl_sx[li] * 0.40f + sx * 0.60f;
+                        smooth_lbl_sy[li] = smooth_lbl_sy[li] * 0.40f + sy * 0.60f;
                     }
 
                     int dst_x = static_cast<int>(std::round(smooth_lbl_sx[li] - lbl.anchor_x));
