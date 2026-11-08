@@ -705,9 +705,9 @@ int main(int argc, char* argv[]) {
     double span_x = rx1 - rx0, span_y = ry1 - ry0;
     bool is_portrait = (H > W);
 
-    // Overview Camera: 70°-72° steep tilt looking firmly downward at satellite earth
+    // Overview Camera: 64°-66° tilt looking downward at satellite earth with clear 3D relief
     // Centers the route on screen and ensures 100% full-screen satellite terrain coverage (0% void)
-    double ov_pitch = (is_portrait ? 72.0 : 70.0) * M_PI / 180.0;
+    double ov_pitch = (is_portrait ? 66.0 : 64.0) * M_PI / 180.0;
     double ov_yaw = 0.0; // Geographic North orientation
     double ov_alt = is_portrait
         ? std::max(std::max(span_x / 0.58, span_y / 1.05) * 1.08, 700.0)
@@ -715,10 +715,11 @@ int main(int argc, char* argv[]) {
     double ov_cx = cx_mid;
     double ov_cy = cy_mid + ov_alt / std::tan(ov_pitch);
 
-    // Cruising (Follow) Camera: 48°-52° tilt to keep 100% terrain coverage from row 0 to row H-1
-    double follow_pitch = (is_portrait ? 52.0 : 48.0) * M_PI / 180.0;
-    double follow_alt   = (is_portrait ? 160.0 : 130.0) * z_scale_factor;
-    double follow_dist  = (is_portrait ? 110.0 : 100.0) * z_scale_factor;
+    // Cruising (Follow) Camera: Lower perspective for immersive ground-level 3D driving flyover
+    // Lowers pitch to 38°-43° and altitude to 75-92px (~270-330m at Zoom 17)
+    double follow_pitch = (is_portrait ? 43.0 : 38.0) * M_PI / 180.0;
+    double follow_alt   = (is_portrait ? 92.0 : 75.0) * z_scale_factor;
+    double follow_dist  = (is_portrait ? 75.0 : 65.0) * z_scale_factor;
 
     // Open ffmpeg pipe
     std::ostringstream cmd;
@@ -795,7 +796,7 @@ int main(int argc, char* argv[]) {
             double sy = smooth_hdg[0];
             double sx = pts[0].px - std::sin(sy) * follow_dist;
             double sy_pos = pts[0].py + std::cos(sy) * follow_dist;
-            double sz = pts[0].pz_route + follow_alt;
+            double sz = std::max(pts[0].pz_route + follow_alt, sample_terrain_h(sx, sy_pos) + 25.0 * z_scale_factor);
             cam_x = ov_cx * (1.0 - u) + sx * u;
             cam_y = ov_cy * (1.0 - u) + sy_pos * u;
             cam_z = ov_alt * (1.0 - u) + sz * u;
@@ -818,7 +819,7 @@ int main(int argc, char* argv[]) {
             cam_pitch = follow_pitch;
             cam_x = px - std::sin(cam_yaw) * follow_dist;
             cam_y = py + std::cos(cam_yaw) * follow_dist;
-            cam_z = pz + follow_alt;
+            cam_z = std::max(pz + follow_alt, sample_terrain_h(cam_x, cam_y) + 25.0 * z_scale_factor);
         } else {
             double u = smoothstep(T2, T3, t_sec);
             cur_idx = N - 1;
@@ -827,7 +828,7 @@ int main(int argc, char* argv[]) {
             double ey = smooth_hdg[N - 1];
             double ex = pts[N - 1].px - std::sin(ey) * follow_dist;
             double ey_pos = pts[N - 1].py + std::cos(ey) * follow_dist;
-            double ez = pts[N - 1].pz_route + follow_alt;
+            double ez = std::max(pts[N - 1].pz_route + follow_alt, sample_terrain_h(ex, ey_pos) + 25.0 * z_scale_factor);
             double d = ey - ov_yaw;
             while (d > M_PI) d -= 2.0 * M_PI;
             while (d < -M_PI) d += 2.0 * M_PI;
