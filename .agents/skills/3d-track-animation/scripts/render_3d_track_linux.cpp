@@ -722,22 +722,24 @@ int main(int argc, char* argv[]) {
     // Dynamic flight timing based on trajectory distance and city landmark density:
     // Ensures viewers have ample time to comfortably see and read every city landmark along the route.
     double d_km = total_dist / 1000.0;
-    double t_dist = 26.0 + 8.5 * std::log(1.0 + std::max(0.0, d_km) / 10.0);
+    double t_dist = 35.0 + 12.0 * std::log(1.0 + std::max(0.0, d_km) / 8.0);
     size_t n_labels = labels.size();
     size_t n_overview = 0;
     for (const auto& l : labels) if (l.overview) n_overview++;
-    double t_cities = std::max(25.0, static_cast<double>(n_labels) * 1.5 + static_cast<double>(n_overview) * 2.0);
-    double cruise_sec = std::clamp(std::max(t_dist, t_cities), 28.0, 105.0);
+    // Allocate ~7.5 seconds of cruising viewing window per milestone label so all words are easy to read
+    double t_cities = std::max(40.0, static_cast<double>(n_labels) * 7.5);
+    double cruise_sec = std::clamp(std::max(t_dist, t_cities), 35.0, 240.0);
 
     // If specified in track_data.json, respect explicit override:
     double json_cruise = extract_json_num(jstr, "cruise_sec", 0.0);
     if (json_cruise >= 15.0) cruise_sec = json_cruise;
 
-    const double INTRO_SEC = 4.5;
-    const double TRANS_SEC = 3.0;
+    // Strictly controlled within 2.0 seconds before track starts and after track finishes
+    const double INTRO_SEC = 1.0;
+    const double TRANS_SEC = 1.0;
     const double CRUISE_SEC = cruise_sec;
-    const double OUTRO_TRANS_SEC = 3.0;
-    const double OUTRO_HOLD_SEC = 4.0;
+    const double OUTRO_TRANS_SEC = 1.0;
+    const double OUTRO_HOLD_SEC = 1.0;
 
     const double T0 = INTRO_SEC;
     const double T1 = T0 + TRANS_SEC;
@@ -768,8 +770,8 @@ int main(int argc, char* argv[]) {
 
         if (t_sec < T0) {
             cur_idx = N - 1;
-            banner_alpha = smoothstep(0.0, 0.8, t_sec) * (1.0 - smoothstep(T0 - 1.0, T0, t_sec));
-            double drift = t_sec / T0;
+            banner_alpha = smoothstep(0.0, 0.3, t_sec) * (1.0 - smoothstep(T0 - 0.2, T0, t_sec));
+            double drift = t_sec / std::max(0.01, T0);
             cam_yaw = ov_yaw + (drift - 0.5) * 0.05;
             cam_pitch = ov_pitch;
             cam_x = ov_cx;
@@ -778,7 +780,7 @@ int main(int argc, char* argv[]) {
         } else if (t_sec < T1) {
             double u = smoothstep(T0, T1, t_sec);
             cur_idx = 0;
-            hud_alpha = smoothstep(T0 + 1.5, T1, t_sec);
+            hud_alpha = smoothstep(T0, T1, t_sec);
             double sy = smooth_hdg[0];
             double sx = pts[0].px - std::sin(sy) * follow_dist;
             double sy_pos = pts[0].py + std::cos(sy) * follow_dist;
@@ -809,8 +811,8 @@ int main(int argc, char* argv[]) {
         } else {
             double u = smoothstep(T2, T3, t_sec);
             cur_idx = N - 1;
-            hud_alpha = 1.0 - smoothstep(T2, T2 + 1.5, t_sec);
-            banner_alpha = smoothstep(T2 + 1.5, T3, t_sec);
+            hud_alpha = 1.0 - smoothstep(T2, T2 + 0.4, t_sec);
+            banner_alpha = smoothstep(T2 + 0.3, T3, t_sec);
             double ey = smooth_hdg[N - 1];
             double ex = pts[N - 1].px - std::sin(ey) * follow_dist;
             double ey_pos = pts[N - 1].py + std::cos(ey) * follow_dist;
@@ -915,12 +917,12 @@ int main(int argc, char* argv[]) {
                         if (is_overview) {
                             if (lbl.overview) target_alpha = 0.95f;
                         } else {
-                            if (dp <= 1650.0f && dp >= 25.0f) {
+                            if (dp <= 3000.0f && dp >= 20.0f) {
                                 float fade = 1.0f;
-                                if (dp > 1150.0f) {
-                                    fade = std::clamp((1650.0f - dp) / 500.0f, 0.0f, 1.0f);
-                                } else if (dp < 60.0f) {
-                                    fade = std::clamp((dp - 25.0f) / 35.0f, 0.0f, 1.0f);
+                                if (dp > 2000.0f) {
+                                    fade = std::clamp((3000.0f - dp) / 1000.0f, 0.0f, 1.0f);
+                                } else if (dp < 45.0f) {
+                                    fade = std::clamp((dp - 20.0f) / 25.0f, 0.0f, 1.0f);
                                 }
                                 target_alpha = fade;
                             }

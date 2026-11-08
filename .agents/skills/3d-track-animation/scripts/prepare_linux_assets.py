@@ -384,8 +384,8 @@ def generate_billboard_labels(td, out_dir):
     if not selected:
         return
 
-    # Render billboard badges with 2x enlarged font (size 24) for prominent readability
-    font = find_cjk_font(24)
+    # Render billboard badges with prominent font (size 28) for high readability
+    font = find_cjk_font(28)
     badges = []
     total_w = 0
     max_h = 0
@@ -399,11 +399,11 @@ def generate_billboard_labels(td, out_dir):
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
 
-        pad_h = 12
-        pad_v = 7
-        pin_h = 6
-        dot_r = 4.5
-        dot_space = int(dot_r * 2 + 10)
+        pad_h = 15
+        pad_v = 8
+        pin_h = 7
+        dot_r = 5.5
+        dot_space = int(dot_r * 2 + 12)
         bw = tw + pad_h * 2 + dot_space
         bh = th + pad_v * 2
 
