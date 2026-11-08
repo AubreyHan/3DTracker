@@ -164,11 +164,14 @@ def choose_optimal_zoom(lats, lons, use_gcj02, forced_z=0):
         min_lat, max_lat = min(lats), max(lats)
         min_lon, max_lon = min(lons), max(lons)
 
-    # Generous margin ensures 100% full-screen map coverage without void borders or fake skirt lines
-    # In vertical 9:16 view, the camera has high vertical span (16/9 = 1.78x) and tilted forward,
-    # so we allocate sufficient latitude margin (especially to the north) and longitude margin.
-    lat_pad = max(0.05, (max_lat - min_lat) * 0.75)
-    lon_pad = max(0.05, (max_lon - min_lon) * 0.35)
+    if forced_z >= 17:
+        # At ultra-high Zoom 17 (sub-meter), use tight 3.8km boundary padding to avoid downloading
+        # tens of thousands of empty tiles beyond the flight viewing frustum
+        lat_pad = min(0.045, max(0.028, (max_lat - min_lat) * 0.18))
+        lon_pad = min(0.045, max(0.028, (max_lon - min_lon) * 0.14))
+    else:
+        lat_pad = max(0.05, (max_lat - min_lat) * 0.75)
+        lon_pad = max(0.05, (max_lon - min_lon) * 0.35)
     b_min_lat = max(-85.0, min_lat - lat_pad)
     b_max_lat = min(85.0, max_lat + lat_pad)
     b_min_lon = max(-179.9, min_lon - lon_pad)
@@ -267,7 +270,7 @@ def download_tiles(
             sat_out = os.path.join(sat_dir, f"{z}_{x}_{y}.jpg")
             sat_url = f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             all_items.append((f"sat/{z}_{x}_{y}.jpg", sat_url, sat_out))
-            if use_road_overlay and z <= 16:
+            if use_road_overlay and z <= 18:
                 road_out = os.path.join(road_dir, f"{z}_{x}_{y}.png")
                 # Use ArcGIS World_Transportation for pure WGS84 road network lines without raster baked-on text
                 road_url = f"https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
@@ -366,7 +369,7 @@ def download_tiles(
     upd_count = 0
     ver_count = 0
     off_count = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=36) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=48) as ex:
         for status in ex.map(fetch_or_verify, work_items):
             if status == 'downloaded':
                 dl_count += 1
