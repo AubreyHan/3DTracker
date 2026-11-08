@@ -761,9 +761,11 @@ def main():
     center_lon = 0.5 * (min(lons) + max(lons))
     in_china = is_in_china(center_lat, center_lon)
 
-    # Use hybrid road overlay + GCJ-02 alignment for driving/cycling or overland routes in China
+    # Use hybrid road overlay for driving/cycling or overland routes in China
     use_road_overlay = bool(in_china and (icon_mode in (1, 2) or cum_dist >= 15000.0))
-    use_gcj02 = use_road_overlay
+    # ArcGIS World Imagery and World_Transportation are pure standard WGS84.
+    # Keep use_gcj02 = False so GPS tracks align 100% physically with real roads without false shift!
+    use_gcj02 = False
 
     z, x_min, x_max, y_min, y_max = choose_optimal_zoom(lats, lons, use_gcj02)
 
