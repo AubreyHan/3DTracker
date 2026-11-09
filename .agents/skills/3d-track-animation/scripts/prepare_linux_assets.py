@@ -329,41 +329,59 @@ def generate_billboard_labels(td, out_dir):
         ("西北旺", 40.0585, 116.2951, 2),
         ("奥森公园", 40.0215, 116.3608, 2)
     ]
-    for poi in local_pois:
-        if not any(g[0] == poi[0] for g in gazetteer):
-            gazetteer.append(poi)
-
     dist_km = float(td.get('total_dist', 0.0)) / 1000.0
-    max_search_d = 65.0 if dist_km > 500.0 else (25.0 if dist_km > 200.0 else 8.5)
-    min_ov_spacing = 140.0 if dist_km > 1000.0 else (50.0 if dist_km > 300.0 else 11.0)
 
-    # Sample track points every 6th point for fast distance check
-    sub_pts = pts[::6] if len(pts) > 6 else pts
+    # Only include hyper-local Beijing village POIs if the trip is local (< 300km)
+    if dist_km < 300.0:
+        for poi in local_pois:
+            if not any(g[0] == poi[0] for g in gazetteer):
+                gazetteer.append(poi)
+
+    max_search_d = 65.0 if dist_km > 500.0 else (25.0 if dist_km > 200.0 else 8.5)
+    min_ov_spacing = 150.0 if dist_km > 1000.0 else (50.0 if dist_km > 300.0 else 11.0)
+
+    # Fast distance check against track points
     selected = []
     seen_names = set()
-    # Suppress redundant broad district prefixes if local POI exists
     broad_names = {"北京朝阳", "北京朝阳区", "朝阳区", "昌平区"}
     for name, clat, clon, tier in gazetteer:
         if name in seen_names or name in broad_names:
             continue
-        min_d = min(haversine_km(clat, clon, p['lat'], p['lon']) for p in sub_pts)
+        # Find closest track point and track distance
+        best_p = min(pts, key=lambda p: (p['lat'] - clat)**2 + (p['lon'] - clon)**2)
+        min_d = haversine_km(clat, clon, best_p['lat'], best_p['lon'])
         if min_d <= max_search_d:
             seen_names.add(name)
-            selected.append({'name': name, 'lat': clat, 'lon': clon, 'tier': tier, 'dist': min_d})
+            selected.append({
+                'name': name,
+                'lat': clat,
+                'lon': clon,
+                'tier': tier,
+                'dist': min_d,
+                'track_dist': float(best_p.get('dist', 0.0))
+            })
 
-    # Enforce minimum spatial spacing between any two labels according to route distance
-    # to completely eliminate screen crowding, jumping, and flickering (Rule 11)
-    min_label_spacing = 45.0 if dist_km > 1000.0 else (20.0 if dist_km > 300.0 else (8.0 if dist_km > 60.0 else 3.2))
+    # Sort milestones strictly in route travel order along the trajectory (Rule 11)
+    selected.sort(key=lambda x: x['track_dist'])
+
+    # Enforce clean spatial spacing along the track to eliminate crowd jumping & flicker
+    min_track_spacing = 55000.0 if dist_km > 1000.0 else (25000.0 if dist_km > 300.0 else (8000.0 if dist_km > 60.0 else 3200.0))
     spaced = []
-    for item in sorted(selected, key=lambda x: (x['tier'], 0 if x.get('overview') else 1)):
-        if not any(haversine_km(item['lat'], item['lon'], s['lat'], s['lon']) < min_label_spacing for s in spaced):
+    for item in selected:
+        if not spaced:
             spaced.append(item)
+            continue
+        gap = item['track_dist'] - spaced[-1]['track_dist']
+        if gap >= min_track_spacing or item['tier'] == 1:
+            if gap < min_track_spacing * 0.75 and item['tier'] < spaced[-1]['tier']:
+                spaced[-1] = item
+            else:
+                spaced.append(item)
     selected = spaced
 
     # Greedily mark overview labels so they do not collide during overview shot
-    selected.sort(key=lambda x: (x['tier'], x['dist']))
     overview_labels = []
-    for item in selected:
+    for item in sorted(selected, key=lambda x: (x['tier'], x['dist'])):
         collides = False
         for ov in overview_labels:
             if haversine_km(item['lat'], item['lon'], ov['lat'], ov['lon']) < min_ov_spacing:
@@ -374,6 +392,9 @@ def generate_billboard_labels(td, out_dir):
             overview_labels.append(item)
         else:
             item['overview'] = False
+
+    # Keep selected in chronological route order
+    selected.sort(key=lambda x: x['track_dist'])
 
     if not selected:
         return
@@ -446,6 +467,7 @@ def generate_billboard_labels(td, out_dir):
             'lon': item['lon'],
             'tier': item['tier'],
             'overview': item['overview'],
+            'track_dist': item.get('track_dist', 0.0),
             'atlas_x': item['atlas_x'],
             'atlas_y': item['atlas_y'],
             'w': item['w'],
@@ -465,10 +487,10 @@ def generate_billboard_labels(td, out_dir):
     if user_cruise >= 15.0:
         cruise_sec = user_cruise
     else:
-        t_dist = 26.0 + 8.5 * math.log(1.0 + max(0.0, dist_km) / 10.0)
-        t_cities = max(25.0, len(labels_meta) * 1.5 + len(overview_labels) * 2.0)
-        cruise_sec = min(120.0, max(28.0, max(t_dist, t_cities)))
-    total_sec = cruise_sec + 14.5
+        t_dist = 30.0 + 10.0 * math.log(1.0 + max(0.0, dist_km) / 10.0)
+        t_cities = max(35.0, len(labels_meta) * 6.5)
+        cruise_sec = min(240.0, max(45.0, max(t_dist, t_cities)))
+    total_sec = cruise_sec + 4.0
     print(f"Generated {len(labels_meta)} screen-aligned billboard labels ({len(overview_labels)} overview) in atlas ({atlas.width}x{atlas.height}).")
     print(f"Dynamic Flight Timing : Dist={dist_km:.1f}km, Cities={len(labels_meta)} ({len(overview_labels)} ov) -> Cruise={cruise_sec:.1f}s, Total={total_sec:.1f}s")
 
